@@ -18,6 +18,11 @@ Most calendar automation tools optimize for a different target:
 - ad-hoc AppleScript snippets
 - large automation or MCP servers
 
+There is also an ecosystem gap on macOS itself:
+
+- Apple ships the built-in `shortcuts` command-line tool, which can drive automation flows including Reminders-oriented workflows
+- Apple does not provide an equivalent dedicated CLI for Calendar.app event management
+
 This repo optimizes for one very specific workflow instead:
 
 > Let an agent create, list, and delete events in the user's actual Apple Calendar on macOS, then let iCloud sync the result.
@@ -31,6 +36,7 @@ In practice, that means the shortest useful path is:
 | Option | Good for | Tradeoff | This repo's angle |
 | --- | --- | --- | --- |
 | `khal` + `vdirsyncer` | CalDAV-first and cross-platform workflows | extra sync layer, more config, not aimed at Calendar.app directly | skip the CalDAV stack when the target is already Apple Calendar on a Mac |
+| Apple Shortcuts + Reminders flows | first-party automation building blocks on macOS | not a dedicated Calendar event CLI, and usually one layer farther from shell-friendly CRUD | provide direct shell commands for Calendar.app events |
 | Random AppleScript snippets | quick one-off experiments | no stable CLI contract, harder for agents to reuse safely | package the behavior as named, repeatable commands |
 | Large MCP / automation servers | broad assistant integrations | much larger surface area than simple calendar CRUD | keep the interface tiny, local, and auditable |
 | **This repo** | **agent-driven Apple Calendar automation on macOS** | **macOS-only by design** | **small non-interactive CLIs for real Calendar.app data** |
