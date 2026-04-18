@@ -1,5 +1,7 @@
 # Apple Calendar CLI Skill
 
+Agent-first Apple Calendar and iCloud automation for macOS.
+
 Use Apple Calendar and iCloud calendars on macOS through a small set of non-interactive local CLIs:
 
 - `addcal`
@@ -7,6 +9,38 @@ Use Apple Calendar and iCloud calendars on macOS through a small set of non-inte
 - `delcal`
 
 This setup is designed for agents such as Codex, Claude Code, Hermes, or any tool that can run shell commands locally.
+
+## Why This Project Exists
+
+Most calendar automation on GitHub falls into one of these buckets:
+
+- CalDAV-first tools like `khal` and `vdirsyncer`
+- generic AppleScript snippets
+- large MCP or automation servers that do far more than calendar operations
+
+This project targets a narrower and more practical use case:
+
+> Give coding agents a tiny, reliable command-line interface for the user's real Apple Calendar on macOS.
+
+That means:
+
+- no interactive TTY workflow
+- no extra CalDAV sync layer
+- no local `.ics`-only detour
+- no giant automation framework required
+
+Just:
+
+`agent -> addcal/listcal/delcal -> Calendar.app -> iCloud`
+
+## Key Advantages
+
+- **Agent-first**: built for Codex, Claude Code, Hermes, and other shell-capable agents
+- **Non-interactive**: create, list, and delete without opening a UI or stepping through prompts
+- **Uses the real Apple Calendar**: events land in Calendar.app, not in a sidecar file format
+- **iCloud-native through the OS**: if Calendar.app already syncs, these commands sync too
+- **Much simpler than CalDAV stacks**: no `vdirsyncer`, no `khal` config, no separate sync troubleshooting
+- **Small surface area**: three commands are easy to audit, script, and extend
 
 ## What This Solves
 
@@ -29,7 +63,7 @@ Use this skill when:
 - you want a stable local CLI for agents
 - you want non-interactive commands that are easy to script
 
-This is a better fit than `khal` when the target is the real Apple Calendar database on a Mac.
+This is a better fit than `khal` when the target is the real Apple Calendar database on a Mac and the caller is an agent or script.
 
 ## Requirements
 
@@ -139,6 +173,16 @@ delcal --calendar "Personal" --title "Dinner" --start "2026-04-18 19:00" --end "
 4. Use `delcal --id ...` for reliable deletion.
 
 For automation, prefer deletion by event id rather than by title only.
+
+## Why It Stands Out
+
+Compared with nearby tools, this project makes a different tradeoff:
+
+- compared with `khal` / `vdirsyncer`: it optimizes for macOS-native iCloud control instead of CalDAV portability
+- compared with one-off AppleScript snippets: it provides reusable, named CLIs with a stable interface
+- compared with large MCP servers: it stays small, local, and easy to adopt
+
+If your target is "make my agent manage my actual Apple Calendar on my Mac", this project is intentionally the shortest path.
 
 ## Why Not khal / vdirsyncer?
 
