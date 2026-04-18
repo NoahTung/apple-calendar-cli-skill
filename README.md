@@ -10,6 +10,7 @@ Use Apple Calendar and iCloud calendars on macOS through a small set of non-inte
 - `editcal`
 - `showcal`
 - `batchcal`
+- `img2cal`
 
 Built for Codex, Claude Code, Hermes, and any local agent that can run shell commands.
 
@@ -28,11 +29,11 @@ There is also an ecosystem gap on macOS itself:
 
 This repo optimizes for one very specific workflow instead:
 
-> Let an agent create, list, and delete events in the user's actual Apple Calendar on macOS, then let iCloud sync the result.
+> Let an agent create, inspect, update, delete, batch-import, and ticket-normalize events in the user's actual Apple Calendar on macOS, then let iCloud sync the result.
 
 In practice, that means the shortest useful path is:
 
-`agent -> addcal/listcal/delcal -> Calendar.app -> iCloud`
+`agent -> local calendar CLIs -> Calendar.app -> iCloud`
 
 ## Why This Repo Instead
 
@@ -54,7 +55,7 @@ That means:
 ## Key Advantages
 
 - **Agent-first**: built for Codex, Claude Code, Hermes, and other shell-capable agents
-- **Non-interactive**: create, list, and delete without opening a UI or stepping through prompts
+- **Non-interactive**: create, inspect, update, delete, batch-import, and normalize ticket events without opening a UI or stepping through prompts
 - **Uses the real Apple Calendar**: events land in Calendar.app, not in a sidecar file format
 - **iCloud-native through the OS**: if Calendar.app already syncs, these commands sync too
 - **Much simpler than CalDAV stacks**: no `vdirsyncer`, no `khal` config, no separate sync troubleshooting
@@ -64,11 +65,11 @@ That means:
 
 Many calendar CLI workflows are built around `khal` + `vdirsyncer` + CalDAV sync. That can be useful, but it adds setup complexity and is often a poor fit when the real goal is simpler:
 
-> Create, list, and delete events in the user's actual Apple Calendar, and let iCloud sync the result.
+> Create, inspect, update, delete, batch-import, and normalize ticket events in the user's actual Apple Calendar, and let iCloud sync the result.
 
 This skill takes the direct route:
 
-`agent -> addcal/listcal/delcal -> Calendar.app -> iCloud`
+`agent -> local calendar CLIs -> Calendar.app -> iCloud`
 
 Because it writes through macOS Calendar.app, events show up in Apple Calendar and sync through iCloud automatically if the account is already connected.
 
@@ -103,18 +104,19 @@ The first run may trigger a macOS Calendar automation prompt. If that happens, a
 - `editcal`: edit an event by id
 - `showcal`: inspect one event by id
 - `batchcal`: dry-run or apply a JSON event plan
+- `img2cal`: normalize ticket data into calendar event drafts or created events
 - `calendar-lib.sh`: shared helper library for the CLI scripts
 
-This repository is meant to be self-contained: publish the docs and the three CLI scripts together.
+This repository is meant to be self-contained: publish the docs, helper library, and CLI scripts together.
 
 ## Installation
 
-Clone the repo, then copy the three scripts into a directory on your `PATH`:
+Clone the repo, then copy the CLI scripts into a directory on your `PATH`:
 
 ```bash
 mkdir -p ~/.local/bin
-cp addcal listcal delcal editcal showcal batchcal calendar-lib.sh ~/.local/bin/
-chmod +x ~/.local/bin/addcal ~/.local/bin/listcal ~/.local/bin/delcal ~/.local/bin/editcal ~/.local/bin/showcal ~/.local/bin/batchcal
+cp addcal listcal delcal editcal showcal batchcal img2cal calendar-lib.sh ~/.local/bin/
+chmod +x ~/.local/bin/addcal ~/.local/bin/listcal ~/.local/bin/delcal ~/.local/bin/editcal ~/.local/bin/showcal ~/.local/bin/batchcal ~/.local/bin/img2cal
 ```
 
 Verify:
@@ -123,6 +125,7 @@ Verify:
 addcal --list-calendars
 listcal --list-calendars
 showcal --help
+img2cal --help
 ```
 
 If macOS asks for Calendar automation permission, allow it for the terminal or agent app you are using.
@@ -221,6 +224,32 @@ batchcal --plan semester.json --apply
 cat birthdays.json | batchcal --stdin --dry-run
 ```
 
+### Normalize ticket data into calendar event
+
+`img2cal` does **not** perform image recognition. The agent or LLM must extract structured ticket fields first, then pass them to `img2cal` for normalization and calendar creation.
+
+```bash
+# Preview the normalized draft
+img2cal --type movie --title "奥本海默" --start "2026-05-01 19:30" --location "万达影城" --seat "8排12座" --draft
+
+# Create the event directly
+img2cal --type train --title "G1234" --start "2026-06-15 08:00" --end "2026-06-15 12:30" --location "上海虹桥站" --carriage "05车" --gate "12A" --apply
+
+# Pass extra fields via stdin JSON
+echo '{"seat": "12A", "boarding_gate": "58", "terminal": "T2"}' | img2cal --type flight --title "CA9876" --start "2026-07-20 14:00" --end "2026-07-20 16:30" --location "上海浦东" --stdin --draft
+```
+
+Supported `--type` values: `movie`, `train`, `bus`, `flight`, `concert`.
+
+`img2cal` automatically:
+
+- Adds a title prefix (`看电影：`, `高铁：`, `汽车：`, `航班：`, `演唱会：`)
+- Computes default `end` times (`movie` +150 min, `concert` +180 min)
+- Formats extra fields (seat, gate, terminal, etc.) into `notes`
+- Resolves `location` via `personal-context.json` `common_venues`
+- Chooses `bucket` or `calendar` via `personal-context.json` preferences
+- Checks for conflicts before `--apply` when an explicit calendar is known
+
 ## Recommended Agent Workflow
 
 1. Use `--calendar` when the exact destination calendar is known.
@@ -231,6 +260,8 @@ cat birthdays.json | batchcal --stdin --dry-run
 6. Use `editcal --id ...` for safe updates.
 7. Use `delcal --id ...` for reliable deletion.
 8. Use `batchcal --dry-run` before large imports.
+9. Use `img2cal --draft` to normalize and preview ticket data before creating events.
+10. Use `img2cal --apply` after the ticket draft is confirmed.
 
 For automation, prefer deletion by event id rather than by title only.
 
@@ -275,5 +306,10 @@ If you publish this skill online, keep the repository self-contained:
 - `addcal`
 - `listcal`
 - `delcal`
+- `editcal`
+- `showcal`
+- `batchcal`
+- `img2cal`
+- `calendar-lib.sh`
 
 Without the companion CLI commands, the skill text alone is not enough.
