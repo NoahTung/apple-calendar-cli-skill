@@ -1,0 +1,338 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$repo_root/calendar-lib.sh"
+
+CALENDAR_CMD_NAME="editcal"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  editcal --id "<event-id>" [--title "..."] [--start "<when>"] [--end "<when>"] [--calendar "<name>"]
+          [--location "..."] [--notes "..."] [--url "..."] [--alarm "<minutes|none>"] [--dry-run]
+EOF
+}
+
+main() {
+  local event_id=""
+  local new_title=""
+  local new_start=""
+  local new_end=""
+  local new_calendar=""
+  local new_location=""
+  local new_notes=""
+  local new_url=""
+  local new_alarm_set=0
+  local new_alarm=""
+  local dry_run=0
+  local changed=0
+  local old_record=""
+  local new_record=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --id)
+        [[ $# -ge 2 ]] || calendar_die "missing value for --id"
+        event_id="$2"
+        shift 2
+        ;;
+      --title)
+        [[ $# -ge 2 ]] || calendar_die "missing value for --title"
+        new_title="$2"
+        changed=1
+        shift 2
+        ;;
+      --start)
+        [[ $# -ge 2 ]] || calendar_die "missing value for --start"
+        new_start="$2"
+        changed=1
+        shift 2
+        ;;
+      --end)
+        [[ $# -ge 2 ]] || calendar_die "missing value for --end"
+        new_end="$2"
+        changed=1
+        shift 2
+        ;;
+      --calendar)
+        [[ $# -ge 2 ]] || calendar_die "missing value for --calendar"
+        new_calendar="$2"
+        changed=1
+        shift 2
+        ;;
+      --location)
+        [[ $# -ge 2 ]] || calendar_die "missing value for --location"
+        new_location="$2"
+        changed=1
+        shift 2
+        ;;
+      --notes)
+        [[ $# -ge 2 ]] || calendar_die "missing value for --notes"
+        new_notes="$2"
+        changed=1
+        shift 2
+        ;;
+      --url)
+        [[ $# -ge 2 ]] || calendar_die "missing value for --url"
+        new_url="$2"
+        changed=1
+        shift 2
+        ;;
+      --alarm)
+        [[ $# -ge 2 ]] || calendar_die "missing value for --alarm"
+        new_alarm="$2"
+        new_alarm_set=1
+        changed=1
+        shift 2
+        ;;
+      --dry-run)
+        dry_run=1
+        shift
+        ;;
+      --help|-h)
+        usage
+        exit 0
+        ;;
+      *)
+        calendar_die "unknown option: $1"
+        ;;
+    esac
+  done
+
+  [[ -n "$event_id" ]] || calendar_die "missing --id"
+  [[ "$changed" -eq 1 ]] || calendar_die "provide at least one field to edit"
+
+  if [[ -n "$new_start" ]]; then
+    new_start="$(parse_datetime_expression "$new_start")"
+  fi
+  if [[ -n "$new_end" ]]; then
+    new_end="$(parse_datetime_expression "$new_end")"
+  fi
+  if [[ -n "$new_start" || -n "$new_end" ]]; then
+    local compare_start compare_end
+    compare_start="${new_start:-1970-01-01 00:00}"
+    compare_end="${new_end:-9999-12-31 23:59}"
+    parse_datetime "$compare_start" compare_start
+    parse_datetime "$compare_end" compare_end
+    if [[ -n "$new_start" && -n "$new_end" && "$compare_end_epoch" -le "$compare_start_epoch" ]]; then
+      calendar_die "end time must be after start time"
+    fi
+  fi
+
+  if [[ "$new_alarm_set" -eq 1 ]]; then
+    new_alarm="$(normalize_alarm "$new_alarm")"
+  fi
+
+  old_record="$(
+    osascript - "$event_id" "$FIELD_DELIM" "$RECORD_DELIM" "$new_title" "$new_start" "$new_end" "$new_calendar" "$new_location" "$new_notes" "$new_url" "$new_alarm_set" "$new_alarm" "$dry_run" <<'APPLESCRIPT'
+on pad2(n)
+  if n < 10 then return "0" & (n as text)
+  return n as text
+end pad2
+
+on isoDate(theDate)
+  set y to year of theDate as integer
+  set m to my pad2(month of theDate as integer)
+  set d to my pad2(day of theDate as integer)
+  set h to my pad2(hours of theDate)
+  set minValue to my pad2(minutes of theDate)
+  return (y as text) & "-" & m & "-" & d & " " & h & ":" & minValue
+end isoDate
+
+on safeText(inputValue)
+  set originalDelims to AppleScript's text item delimiters
+  set AppleScript's text item delimiters to return
+  set parts to every text item of (inputValue as text)
+  set AppleScript's text item delimiters to "\\n"
+  set normalizedValue to parts as text
+  set AppleScript's text item delimiters to originalDelims
+  return normalizedValue
+end safeText
+
+on eventRecord(evt, calName, fieldDelim, recordDelim)
+  set alarmValue to ""
+  set eventLocation to ""
+  set eventNotes to ""
+  set eventURL to ""
+  if (count of display alarms of evt) > 0 then
+    set alarmValue to trigger interval of first display alarm of evt
+  end if
+  try
+    set eventLocation to location of evt
+  end try
+  try
+    set eventNotes to description of evt
+  end try
+  try
+    set eventURL to url of evt
+  end try
+  set recurrenceValue to ""
+  try
+    set recurrenceValue to recurrence of evt
+  end try
+  return (id of evt) & fieldDelim & calName & fieldDelim & my safeText(summary of evt) & fieldDelim & my isoDate(start date of evt) & fieldDelim & my isoDate(end date of evt) & fieldDelim & my safeText(eventLocation) & fieldDelim & my safeText(eventNotes) & fieldDelim & my safeText(eventURL) & fieldDelim & (alarmValue as text) & fieldDelim & my safeText(recurrenceValue) & recordDelim
+end eventRecord
+
+on parseDateString(dateString)
+  set text item delimiters to {"-", " ", ":"}
+  set parts to text items of dateString
+  set text item delimiters to ""
+  set outputDate to current date
+  set year of outputDate to (item 1 of parts) as integer
+  set month of outputDate to (item 2 of parts) as integer
+  set day of outputDate to (item 3 of parts) as integer
+  set time of outputDate to (((item 4 of parts) as integer) * hours) + (((item 5 of parts) as integer) * minutes)
+  return outputDate
+end parseDateString
+
+on run argv
+  set targetEventId to item 1 of argv
+  set fieldDelim to item 2 of argv
+  set recordDelim to item 3 of argv
+  set newTitle to item 4 of argv
+  set newStartString to item 5 of argv
+  set newEndString to item 6 of argv
+  set newCalendarName to item 7 of argv
+  set newLocation to item 8 of argv
+  set newNotes to item 9 of argv
+  set newURL to item 10 of argv
+  set alarmSet to item 11 of argv
+  set newAlarm to item 12 of argv
+  set dryRunValue to item 13 of argv
+
+  tell application "Calendar"
+    set foundCalendar to missing value
+    set foundEvent to missing value
+    repeat with cal in calendars
+      set candidateEvents to every event of cal whose id is targetEventId
+      if (count of candidateEvents) > 0 then
+        set foundCalendar to cal
+        set foundEvent to item 1 of candidateEvents
+        exit repeat
+      end if
+    end repeat
+
+    if foundEvent is missing value then error "Event not found: " & targetEventId
+
+    set oldRecordText to my eventRecord(foundEvent, name of foundCalendar, fieldDelim, recordDelim)
+
+    set effectiveTitle to summary of foundEvent
+    set effectiveStart to start date of foundEvent
+    set effectiveEnd to end date of foundEvent
+    set effectiveLocation to location of foundEvent
+    set effectiveNotes to description of foundEvent
+    set effectiveURL to url of foundEvent
+    set effectiveRecurrence to ""
+    try
+      set effectiveRecurrence to recurrence of foundEvent
+    end try
+    set targetCalendar to foundCalendar
+
+    if newTitle is not "" then set effectiveTitle to newTitle
+    if newStartString is not "" then set effectiveStart to my parseDateString(newStartString)
+    if newEndString is not "" then set effectiveEnd to my parseDateString(newEndString)
+    if newLocation is not "" then set effectiveLocation to newLocation
+    if newNotes is not "" then set effectiveNotes to newNotes
+    if newURL is not "" then set effectiveURL to newURL
+
+    if newCalendarName is not "" then
+      if not (exists calendar newCalendarName) then error "Calendar not found: " & newCalendarName
+      set targetCalendar to calendar newCalendarName
+    end if
+
+    if dryRunValue is "0" then
+      if (name of targetCalendar) is (name of foundCalendar) then
+        set summary of foundEvent to effectiveTitle
+        set start date of foundEvent to effectiveStart
+        set end date of foundEvent to effectiveEnd
+        set location of foundEvent to effectiveLocation
+        set description of foundEvent to effectiveNotes
+        set url of foundEvent to effectiveURL
+
+        if alarmSet is "1" then
+          repeat with existingAlarm in display alarms of foundEvent
+            delete existingAlarm
+          end repeat
+          if newAlarm is not "none" and newAlarm is not "" then
+            tell foundEvent
+              make new display alarm at end of display alarms with properties {trigger interval:(-1 * (newAlarm as integer))}
+            end tell
+          end if
+        end if
+      else
+        tell targetCalendar
+          set clonedEvent to make new event with properties {summary:effectiveTitle, start date:effectiveStart, end date:effectiveEnd}
+        end tell
+        set location of clonedEvent to effectiveLocation
+        set description of clonedEvent to effectiveNotes
+        set url of clonedEvent to effectiveURL
+        if effectiveRecurrence is not "" then set recurrence of clonedEvent to effectiveRecurrence
+        if alarmSet is "1" then
+          if newAlarm is not "none" and newAlarm is not "" then
+            tell clonedEvent
+              make new display alarm at end of display alarms with properties {trigger interval:(-1 * (newAlarm as integer))}
+            end tell
+          end if
+        else if (count of display alarms of foundEvent) > 0 then
+          tell clonedEvent
+            make new display alarm at end of display alarms with properties {trigger interval:(trigger interval of first display alarm of foundEvent)}
+          end tell
+        end if
+        delete foundEvent
+        set foundEvent to clonedEvent
+        set foundCalendar to targetCalendar
+      end if
+    else
+      if newCalendarName is not "" then set foundCalendar to targetCalendar
+    end if
+
+    if dryRunValue is "1" then
+      set shadowEventTitle to effectiveTitle
+      set shadowStart to effectiveStart
+      set shadowEnd to effectiveEnd
+      set shadowLocation to effectiveLocation
+      set shadowNotes to effectiveNotes
+      set shadowURL to effectiveURL
+      set alarmValue to ""
+      if alarmSet is "1" then
+        if newAlarm is not "none" then set alarmValue to "-" & newAlarm
+      else if (count of display alarms of foundEvent) > 0 then
+        set alarmValue to trigger interval of first display alarm of foundEvent
+      end if
+      set newRecordText to targetEventId & fieldDelim & (name of foundCalendar) & fieldDelim & my safeText(shadowEventTitle) & fieldDelim & my isoDate(shadowStart) & fieldDelim & my isoDate(shadowEnd) & fieldDelim & my safeText(shadowLocation) & fieldDelim & my safeText(shadowNotes) & fieldDelim & my safeText(shadowURL) & fieldDelim & (alarmValue as text) & fieldDelim & my safeText(effectiveRecurrence) & recordDelim
+    else
+      set newRecordText to my eventRecord(foundEvent, name of foundCalendar, fieldDelim, recordDelim)
+    end if
+
+    return oldRecordText & newRecordText
+  end tell
+end run
+APPLESCRIPT
+  )"
+
+  [[ -n "$old_record" ]] || calendar_die "event not found: $event_id"
+  local combined_records="$old_record"
+  old_record="$(python3 - "$combined_records" <<'PY'
+import sys
+parts = [part for part in sys.argv[1].split("\036") if part]
+print((parts[0] if parts else "") + ("\036" if parts else ""), end="")
+PY
+)"
+  new_record="$(python3 - "$combined_records" <<'PY'
+import sys
+parts = [part for part in sys.argv[1].split("\036") if part]
+print((parts[1] if len(parts) > 1 else "") + ("\036" if len(parts) > 1 else ""), end="")
+PY
+)"
+
+  printf 'Old:\n'
+  event_records_to_table "$old_record" 1
+  printf 'New:\n'
+  event_records_to_table "$new_record" 1
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

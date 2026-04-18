@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$repo_root/calendar-lib.sh"
+
+CALENDAR_CMD_NAME="showcal"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  showcal --id "<event-id>" [--format table|json]
+EOF
+}
+
+fetch_event() {
+  local event_id="$1"
+
+  osascript - "$event_id" "$FIELD_DELIM" "$RECORD_DELIM" <<'APPLESCRIPT'
+on pad2(n)
+  if n < 10 then return "0" & (n as text)
+  return n as text
+end pad2
+
+on isoDate(theDate)
+  set y to year of theDate as integer
+  set m to my pad2(month of theDate as integer)
+  set d to my pad2(day of theDate as integer)
+  set h to my pad2(hours of theDate)
+  set minValue to my pad2(minutes of theDate)
+  return (y as text) & "-" & m & "-" & d & " " & h & ":" & minValue
+end isoDate
+
+on safeText(inputValue)
+  set originalDelims to AppleScript's text item delimiters
+  set AppleScript's text item delimiters to return
+  set parts to every text item of (inputValue as text)
+  set AppleScript's text item delimiters to "\\n"
+  set normalizedValue to parts as text
+  set AppleScript's text item delimiters to originalDelims
+  return normalizedValue
+end safeText
+
+on run argv
+  set targetEventId to item 1 of argv
+  set fieldDelim to item 2 of argv
+  set recordDelim to item 3 of argv
+
+  tell application "Calendar"
+    repeat with cal in calendars
+      set candidateEvents to every event of cal whose id is targetEventId
+      if (count of candidateEvents) > 0 then
+        set evt to item 1 of candidateEvents
+        set alarmValue to ""
+        set eventLocation to ""
+        set eventNotes to ""
+        set eventURL to ""
+        if (count of display alarms of evt) > 0 then
+          set alarmValue to trigger interval of first display alarm of evt
+        end if
+        try
+          set eventLocation to location of evt
+        end try
+        try
+          set eventNotes to description of evt
+        end try
+        try
+          set eventURL to url of evt
+        end try
+        set recurrenceValue to ""
+        try
+          set recurrenceValue to recurrence of evt
+        end try
+        return (id of evt) & fieldDelim & (name of cal) & fieldDelim & my safeText(summary of evt) & fieldDelim & my isoDate(start date of evt) & fieldDelim & my isoDate(end date of evt) & fieldDelim & my safeText(eventLocation) & fieldDelim & my safeText(eventNotes) & fieldDelim & my safeText(eventURL) & fieldDelim & (alarmValue as text) & fieldDelim & my safeText(recurrenceValue) & recordDelim
+      end if
+    end repeat
+  end tell
+end run
+APPLESCRIPT
+}
+
+main() {
+  local event_id=""
+  local format="table"
+  local raw_output=""
+  local id calendar title start end location notes url alarm recurrence
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --id)
+        [[ $# -ge 2 ]] || calendar_die "missing value for --id"
+        event_id="$2"
+        shift 2
+        ;;
+      --format)
+        [[ $# -ge 2 ]] || calendar_die "missing value for --format"
+        format="$2"
+        shift 2
+        ;;
+      --help|-h)
+        usage
+        exit 0
+        ;;
+      *)
+        calendar_die "unknown option: $1"
+        ;;
+    esac
+  done
+
+  [[ -n "$event_id" ]] || calendar_die "missing --id"
+  [[ "$format" == "table" || "$format" == "json" ]] || calendar_die "unsupported format '$format' (use table or json)"
+
+  raw_output="$(fetch_event "$event_id")"
+  [[ -n "$raw_output" ]] || calendar_die "event not found: $event_id"
+
+  if [[ "$format" == "json" ]]; then
+    json_from_records "$raw_output"
+    exit 0
+  fi
+
+  IFS="$FIELD_DELIM" read -r id calendar title start end location notes url alarm recurrence <<< "${raw_output%$RECORD_DELIM}"
+  printf 'id: %s\n' "$id"
+  printf 'calendar: %s\n' "$calendar"
+  printf 'title: %s\n' "$title"
+  printf 'start: %s\n' "$start"
+  printf 'end: %s\n' "$end"
+  [[ -n "$location" ]] && printf 'location: %s\n' "$location"
+  [[ -n "$notes" ]] && printf 'notes: %s\n' "$notes"
+  [[ -n "$url" ]] && printf 'url: %s\n' "$url"
+  [[ -n "$alarm" ]] && printf 'alarm: %s\n' "$alarm"
+  [[ -n "$recurrence" ]] && printf 'recurrence: %s\n' "$recurrence"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

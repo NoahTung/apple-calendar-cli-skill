@@ -1,0 +1,201 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$repo_root/calendar-lib.sh"
+
+CALENDAR_CMD_NAME="batchcal"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  batchcal --plan <file.json> --dry-run
+  batchcal --plan <file.json> --apply
+  batchcal --stdin --dry-run
+  batchcal --stdin --apply
+EOF
+}
+
+load_plan() {
+  local mode="$1"
+  local input="$2"
+
+  if [[ "$mode" == "file" ]]; then
+    [[ -f "$input" ]] || calendar_die "plan file not found: $input"
+    cat "$input"
+  else
+    cat
+  fi
+}
+
+normalize_plan() {
+  local raw_json="$1"
+
+  python3 - "$raw_json" <<'PY' || exit 1
+import json
+import re
+import sys
+
+raw_json = sys.argv[1]
+plan = json.loads(raw_json)
+
+def validate_datetime_expr(value: str) -> bool:
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", value):
+        return True
+    if re.fullmatch(r"(today|tomorrow)\s+\d{1,2}(?::\d{2})?\s*([ap]m)?", value, flags=re.IGNORECASE):
+        return True
+    if re.fullmatch(r"\+\d+[hmHM]", value):
+        return True
+    return False
+
+defaults = {
+    "calendar": plan.get("calendar", ""),
+    "bucket": plan.get("bucket", ""),
+    "timezone": plan.get("timezone", ""),
+    "mode": plan.get("mode", ""),
+}
+events = plan.get("events")
+if not isinstance(events, list) or not events:
+    raise SystemExit("batchcal: plan must contain a non-empty events array")
+
+normalized = []
+for index, event in enumerate(events, start=1):
+    if not isinstance(event, dict):
+        raise SystemExit(f"batchcal: event #{index} must be an object")
+    merged = defaults | event
+    event_type = merged.get("type", "single")
+    title = merged.get("title", "")
+    if not title:
+        raise SystemExit(f"batchcal: event #{index} is missing title")
+    start = merged.get("start", "")
+    end = merged.get("end", "")
+    if not start or not end:
+        raise SystemExit(f"batchcal: event #{index} is missing start/end")
+    if not validate_datetime_expr(start):
+        raise SystemExit(f"batchcal: event #{index} has invalid start '{start}'")
+    if not validate_datetime_expr(end):
+        raise SystemExit(f"batchcal: event #{index} has invalid end '{end}'")
+    if event_type not in {"single", "recurring"}:
+        raise SystemExit(f"batchcal: event #{index} has unsupported type '{event_type}'")
+    recurrence = merged.get("recurrence", "")
+    if event_type == "recurring" and not recurrence:
+        raise SystemExit(f"batchcal: event #{index} is missing recurrence")
+    normalized.append({
+        "index": index,
+        "type": event_type,
+        "title": title,
+        "start": start,
+        "end": end,
+        "calendar": merged.get("calendar", ""),
+        "bucket": merged.get("bucket", ""),
+        "location": merged.get("location", ""),
+        "notes": merged.get("notes", ""),
+        "url": merged.get("url", ""),
+        "alarm": merged.get("alarm", ""),
+        "repeat": recurrence,
+        "source_key": merged.get("source_key", ""),
+    })
+
+print(json.dumps(normalized, ensure_ascii=False))
+PY
+}
+
+main() {
+  local input_mode=""
+  local plan_file=""
+  local do_apply=0
+  local do_dry_run=0
+  local raw_json=""
+  local normalized_json=""
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --plan)
+        [[ $# -ge 2 ]] || calendar_die "missing value for --plan"
+        input_mode="file"
+        plan_file="$2"
+        shift 2
+        ;;
+      --stdin)
+        input_mode="stdin"
+        shift
+        ;;
+      --dry-run)
+        do_dry_run=1
+        shift
+        ;;
+      --apply)
+        do_apply=1
+        shift
+        ;;
+      --help|-h)
+        usage
+        exit 0
+        ;;
+      *)
+        calendar_die "unknown option: $1"
+        ;;
+    esac
+  done
+
+  [[ -n "$input_mode" ]] || calendar_die "choose --plan or --stdin"
+  [[ $((do_apply + do_dry_run)) -eq 1 ]] || calendar_die "choose exactly one of --dry-run or --apply"
+
+  if [[ "$input_mode" == "file" ]]; then
+    raw_json="$(load_plan file "$plan_file")"
+  else
+    raw_json="$(load_plan stdin "")"
+  fi
+  normalized_json="$(normalize_plan "$raw_json")"
+
+  if [[ "$do_dry_run" -eq 1 ]]; then
+    python3 - "$normalized_json" <<'PY'
+import json
+import sys
+items = json.loads(sys.argv[1])
+print(f"Planned events: {len(items)}")
+for item in items:
+    destination = item["calendar"] or f"bucket:{item['bucket']}" if item["bucket"] else "(default)"
+    print(f"- #{item['index']} {item['type']} | {item['title']} | {item['start']} -> {item['end']} | {destination}")
+    if item["repeat"]:
+        print(f"  recurrence: {item['repeat']}")
+    if item["source_key"]:
+        print(f"  source_key: {item['source_key']}")
+PY
+    exit 0
+  fi
+
+  python3 - "$normalized_json" <<'PY' | while IFS=$'\t' read -r title start end calendar bucket location notes url alarm repeat; do
+import json
+import sys
+items = json.loads(sys.argv[1])
+for item in items:
+    print("\t".join([
+        item["title"],
+        item["start"],
+        item["end"],
+        item["calendar"],
+        item["bucket"],
+        item["location"],
+        item["notes"],
+        item["url"],
+        item["alarm"],
+        item["repeat"],
+    ]))
+PY
+    cmd=("$repo_root/addcal" --start "$start" --end "$end" --title "$title")
+    [[ -n "$calendar" ]] && cmd+=(--calendar "$calendar")
+    [[ -n "$bucket" ]] && cmd+=(--bucket "$bucket")
+    [[ -n "$location" ]] && cmd+=(--location "$location")
+    [[ -n "$notes" ]] && cmd+=(--notes "$notes")
+    [[ -n "$url" ]] && cmd+=(--url "$url")
+    [[ -n "$alarm" ]] && cmd+=(--alarm "$alarm")
+    [[ -n "$repeat" ]] && cmd+=(--repeat "$repeat")
+    "${cmd[@]}"
+  done
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

@@ -1,6 +1,6 @@
 ---
 name: apple-calendar-cli
-description: Manage Apple Calendar and iCloud calendars on macOS with non-interactive local CLIs: `addcal`, `listcal`, and `delcal`. Use when an agent needs to create, list, or delete real Calendar.app events that should sync to iCloud.
+description: Manage Apple Calendar and iCloud calendars on macOS with non-interactive local CLIs: `addcal`, `listcal`, `delcal`, `editcal`, `showcal`, and `batchcal`. Use when an agent needs to create, inspect, update, delete, or batch-import real Calendar.app events that should sync to iCloud.
 metadata: {"clawdbot":{"emoji":"🗓️","os":["macos"],"requires":{"bins":["addcal","listcal","delcal"]}}}
 ---
 
@@ -10,7 +10,7 @@ Use these local commands instead of `khal` when the goal is to manipulate the re
 
 ## Why this skill
 
-- `addcal`, `listcal`, and `delcal` are non-interactive and agent-friendly.
+- `addcal`, `listcal`, `delcal`, `editcal`, `showcal`, and `batchcal` are non-interactive and agent-friendly.
 - They write to Apple Calendar directly through AppleScript.
 - If Calendar.app is already connected to iCloud, changes sync automatically.
 
@@ -35,6 +35,8 @@ listcal --list-calendars
 addcal "2026-04-18 19:00" "2026-04-18 20:00" "吃饭"
 addcal --calendar "个人" --start "2026-04-18 19:00" --end "2026-04-18 20:00" --title "吃饭"
 addcal --bucket work --start "2026-04-18 09:00" --end "2026-04-18 09:30" --title "Team standup"
+addcal --calendar "个人" --start "today 18:00" --end "today 19:00" --title "海底捞晚饭" --location "万达广场3楼" --notes "已订位，4人" --alarm 15
+addcal --calendar "个人" --start "2026-04-18 18:00" --end "2026-04-18 19:00" --title "健身" --repeat "weekly 1,3,5"
 ```
 
 `--calendar` is the explicit override.
@@ -53,7 +55,21 @@ listcal --all-calendars --start "2026-04-18 00:00" --end "2026-04-19 00:00" --fo
 Use `--format tsv` for agent parsing. Output columns are:
 
 ```text
-id    calendar    title    start    end
+id    calendar    title    start    end    location    notes    url    alarm    recurrence
+```
+
+### Inspect an event
+
+```bash
+showcal --id "0243912F-0D42-4477-A193-A881F73E7434"
+showcal --id "0243912F-0D42-4477-A193-A881F73E7434" --format json
+```
+
+### Edit an event
+
+```bash
+editcal --id "0243912F-0D42-4477-A193-A881F73E7434" --start "2026-04-18 21:00" --end "2026-04-18 22:00"
+editcal --id "0243912F-0D42-4477-A193-A881F73E7434" --title "剪辑视频v2" --alarm 10 --dry-run
 ```
 
 ### Delete events
@@ -72,6 +88,14 @@ delcal --calendar "个人" --title "吃饭" --start "2026-04-18 19:00" --end "20
 
 Use `--dry-run` before deletion if the match could be ambiguous.
 
+### Batch import from JSON
+
+```bash
+batchcal --plan semester.json --dry-run
+batchcal --plan semester.json --apply
+cat birthdays.json | batchcal --stdin --dry-run
+```
+
 ## Agent workflow
 
 Route events in this order:
@@ -85,8 +109,10 @@ Route events in this order:
 Then:
 
 1. Use `addcal` to create new events.
-2. Use `listcal --format tsv` to inspect existing events and capture ids.
-3. Use `delcal --id ...` for safe deletion.
+2. Use `listcal --format tsv` or `showcal --format json` to inspect existing events and capture ids.
+3. Use `editcal --id ...` for safe updates.
+4. Use `delcal --id ...` for safe deletion.
+5. Use `batchcal --dry-run` before any large import.
 
 ## Notes
 
@@ -96,6 +122,6 @@ Then:
 
 ## Pitfalls
 
-- **No `--alarm` option**: `addcal` does not support `--alarm`. Calendar.app default alert settings apply automatically.
+- **Batch input is JSON-first**: `batchcal` does not parse natural language directly. The agent should turn user requests into JSON first, then run `batchcal`.
 - **Install location**: This skill lives at `~/skills/apple-calendar-cli/`, not `~/.hermes/skills/`. Use full path `/Users/mac/skills/apple-calendar-cli/addcal` if the skill is not installed in the Hermes skills directory.
 - **Always check `--help` first**: The CLI syntax may differ from intuition (e.g. short form `addcal "start" "end" "title"` vs long form with `--start`, `--end`, `--title`, `--calendar`).

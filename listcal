@@ -2,195 +2,306 @@
 
 set -euo pipefail
 
-DEFAULT_CALENDAR="个人"
-DEFAULT_FORMAT="table"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$repo_root/calendar-lib.sh"
+
+CALENDAR_CMD_NAME="listcal"
 
 usage() {
   cat <<'EOF'
 Usage:
   listcal [calendar] [start] [end]
-  listcal --calendar "<name>" [--start "<YYYY-MM-DD HH:MM>"] [--end "<YYYY-MM-DD HH:MM>"] [--all-calendars] [--format table|tsv]
+  listcal --calendar "<name>" [--start "<when>"] [--end "<when>"] [--all-calendars]
+          [--format table|tsv|json] [--title-contains "<text>"]
+          [--today|--tomorrow|--this-week]
   listcal --list-calendars
-
-Examples:
-  listcal
-  listcal "个人"
-  listcal "个人" "2026-04-18 00:00" "2026-04-19 00:00"
-  listcal --all-calendars --start "2026-04-18 00:00" --end "2026-04-19 00:00" --format tsv
 EOF
 }
 
-die() {
-  printf 'listcal: %s\n' "$1" >&2
-  exit 1
+query_events() {
+  local all_calendars="$1"
+  local calendar="$2"
+  local title_contains="$3"
+
+  osascript - "$all_calendars" "$calendar" "$title_contains" "$FIELD_DELIM" "$RECORD_DELIM" \
+    "$start_year" "$start_month" "$start_day" "$start_hour" "$start_minute" \
+    "$end_year" "$end_month" "$end_day" "$end_hour" "$end_minute" <<'APPLESCRIPT'
+on pad2(n)
+  if n < 10 then return "0" & (n as text)
+  return n as text
+end pad2
+
+on isoDate(theDate)
+  set y to year of theDate as integer
+  set m to my pad2(month of theDate as integer)
+  set d to my pad2(day of theDate as integer)
+  set h to my pad2(hours of theDate)
+  set minValue to my pad2(minutes of theDate)
+  return (y as text) & "-" & m & "-" & d & " " & h & ":" & minValue
+end isoDate
+
+on safeText(inputValue)
+  set originalDelims to AppleScript's text item delimiters
+  set AppleScript's text item delimiters to return
+  set parts to every text item of (inputValue as text)
+  set AppleScript's text item delimiters to "\\n"
+  set normalizedValue to parts as text
+  set AppleScript's text item delimiters to originalDelims
+  return normalizedValue
+end safeText
+
+on run argv
+  set includeAllCalendars to item 1 of argv
+  set selectedCalendar to item 2 of argv
+  set titleContains to item 3 of argv
+  set fieldDelim to item 4 of argv
+  set recordDelim to item 5 of argv
+  set startYear to (item 6 of argv) as integer
+  set startMonth to (item 7 of argv) as integer
+  set startDay to (item 8 of argv) as integer
+  set startHour to (item 9 of argv) as integer
+  set startMinute to (item 10 of argv) as integer
+  set endYear to (item 11 of argv) as integer
+  set endMonth to (item 12 of argv) as integer
+  set endDay to (item 13 of argv) as integer
+  set endHour to (item 14 of argv) as integer
+  set endMinute to (item 15 of argv) as integer
+
+  set startDate to current date
+  set year of startDate to startYear
+  set month of startDate to startMonth
+  set day of startDate to startDay
+  set time of startDate to (startHour * hours) + (startMinute * minutes)
+
+  set endDate to current date
+  set year of endDate to endYear
+  set month of endDate to endMonth
+  set day of endDate to endDay
+  set time of endDate to (endHour * hours) + (endMinute * minutes)
+
+  tell application "Calendar"
+    if includeAllCalendars is "0" and not (exists calendar selectedCalendar) then error "Calendar not found: " & selectedCalendar
+    if includeAllCalendars is "1" then
+      set selectedCalendars to every calendar
+    else
+      set selectedCalendars to {calendar selectedCalendar}
+    end if
+
+    set outputText to ""
+
+    repeat with cal in selectedCalendars
+      repeat with evt in (every event of cal whose start date < endDate and end date > startDate)
+        set eventTitle to summary of evt
+        if titleContains is "" or eventTitle contains titleContains then
+          set alarmValue to ""
+          set eventLocation to ""
+          set eventNotes to ""
+          set eventURL to ""
+          if (count of display alarms of evt) > 0 then
+            set alarmValue to trigger interval of first display alarm of evt
+          end if
+          try
+            set eventLocation to location of evt
+          end try
+          try
+            set eventNotes to description of evt
+          end try
+          try
+            set eventURL to url of evt
+          end try
+          set recurrenceValue to ""
+          try
+            set recurrenceValue to recurrence of evt
+          end try
+          set recordText to (id of evt) & fieldDelim & (name of cal) & fieldDelim & my safeText(eventTitle) & fieldDelim & my isoDate(start date of evt) & fieldDelim & my isoDate(end date of evt) & fieldDelim & my safeText(eventLocation) & fieldDelim & my safeText(eventNotes) & fieldDelim & my safeText(eventURL) & fieldDelim & (alarmValue as text) & fieldDelim & my safeText(recurrenceValue)
+          set outputText to outputText & recordText & recordDelim
+        end if
+      end repeat
+    end repeat
+
+    return outputText
+  end tell
+end run
+APPLESCRIPT
 }
 
-validate_datetime() {
-  local input="$1"
-  date -j -f "%Y-%m-%d %H:%M" "$input" "+%s" >/dev/null 2>&1 || \
-    die "invalid datetime '$input' (expected YYYY-MM-DD HH:MM)"
-}
+main() {
+  local calendar="$DEFAULT_CALENDAR"
+  local start=""
+  local end=""
+  local all_calendars=0
+  local list_only=0
+  local format="$DEFAULT_FORMAT"
+  local preset=""
+  local title_contains=""
 
-list_calendars() {
-  osascript -e 'tell application "Calendar" to get name of calendars'
-}
+  if [[ $# -eq 0 ]]; then
+    {
+      IFS= read -r start
+      IFS= read -r _
+    } < <(compute_range_from_preset today)
+    end="$(python3 - "$start" <<'PY'
+from datetime import datetime, timedelta
+import sys
+dt = datetime.strptime(sys.argv[1], "%Y-%m-%d %H:%M")
+print((dt + timedelta(days=7)).strftime("%Y-%m-%d %H:%M"))
+PY
+)"
+  fi
 
-calendar="$DEFAULT_CALENDAR"
-start=""
-end=""
-all_calendars=0
-list_only=0
-format="$DEFAULT_FORMAT"
+  if [[ $# -gt 0 && ( "$1" == "--help" || "$1" == "-h" ) ]]; then
+    usage
+    exit 0
+  fi
 
-if [[ $# -eq 0 ]]; then
-  start="$(date '+%Y-%m-%d 00:00')"
-  end="$(date -v+7d '+%Y-%m-%d 00:00')"
-fi
-
-if [[ $# -gt 0 && ( "$1" == "--help" || "$1" == "-h" ) ]]; then
-  usage
-  exit 0
-fi
-
-if [[ $# -gt 0 && "$1" == --* ]]; then
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --calendar)
-        [[ $# -ge 2 ]] || die "missing value for --calendar"
-        calendar="$2"
-        shift 2
+  if [[ $# -gt 0 && "$1" == --* ]]; then
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --calendar)
+          [[ $# -ge 2 ]] || calendar_die "missing value for --calendar"
+          calendar="$2"
+          shift 2
+          ;;
+        --start)
+          [[ $# -ge 2 ]] || calendar_die "missing value for --start"
+          start="$2"
+          shift 2
+          ;;
+        --end)
+          [[ $# -ge 2 ]] || calendar_die "missing value for --end"
+          end="$2"
+          shift 2
+          ;;
+        --all-calendars)
+          all_calendars=1
+          shift
+          ;;
+        --list-calendars)
+          list_only=1
+          shift
+          ;;
+        --format)
+          [[ $# -ge 2 ]] || calendar_die "missing value for --format"
+          format="$2"
+          shift 2
+          ;;
+        --title-contains)
+          [[ $# -ge 2 ]] || calendar_die "missing value for --title-contains"
+          title_contains="$2"
+          shift 2
+          ;;
+        --today|--tomorrow|--this-week)
+          [[ -z "$preset" ]] || calendar_die "use only one preset range"
+          preset="${1#--}"
+          shift
+          ;;
+        --help|-h)
+          usage
+          exit 0
+          ;;
+        *)
+          calendar_die "unknown option: $1"
+          ;;
+      esac
+    done
+  else
+    case $# in
+      0)
         ;;
-      --start)
-        [[ $# -ge 2 ]] || die "missing value for --start"
+      1)
+        calendar="$1"
+        ;;
+      3)
+        calendar="$1"
         start="$2"
-        shift 2
-        ;;
-      --end)
-        [[ $# -ge 2 ]] || die "missing value for --end"
-        end="$2"
-        shift 2
-        ;;
-      --all-calendars)
-        all_calendars=1
-        shift
-        ;;
-      --list-calendars)
-        list_only=1
-        shift
-        ;;
-      --format)
-        [[ $# -ge 2 ]] || die "missing value for --format"
-        format="$2"
-        shift 2
-        ;;
-      --help|-h)
-        usage
-        exit 0
+        end="$3"
         ;;
       *)
-        die "unknown option: $1"
+        usage
+        exit 1
         ;;
     esac
-  done
-else
-  case $# in
-    0)
+  fi
+
+  if [[ $list_only -eq 1 ]]; then
+    list_calendars
+    exit 0
+  fi
+
+  [[ "$format" == "table" || "$format" == "tsv" || "$format" == "json" ]] || calendar_die "unsupported format '$format' (use table, tsv, or json)"
+
+  if [[ -n "$preset" && ( -n "$start" || -n "$end" ) ]]; then
+    calendar_die "preset ranges cannot be combined with --start/--end"
+  fi
+
+  if [[ -n "$preset" ]]; then
+    {
+      IFS= read -r start
+      IFS= read -r end
+    } < <(compute_range_from_preset "$preset")
+  fi
+
+  if [[ -z "$start" ]]; then
+    {
+      IFS= read -r start
+      IFS= read -r _
+    } < <(compute_range_from_preset today)
+  else
+    start="$(parse_datetime_expression "$start")"
+  fi
+
+  if [[ -z "$end" ]]; then
+    end="$(
+      python3 - "$start" <<'PY'
+from datetime import datetime, timedelta
+import sys
+
+dt = datetime.strptime(sys.argv[1], "%Y-%m-%d %H:%M")
+print((dt + timedelta(days=7)).strftime("%Y-%m-%d %H:%M"))
+PY
+    )"
+  else
+    end="$(parse_datetime_expression "$end")"
+  fi
+
+  parse_datetime "$start" start
+  parse_datetime "$end" end
+  if [[ "$end_epoch" -le "$start_epoch" ]]; then
+    calendar_die "end time must be after start time"
+  fi
+
+  local raw_output
+  raw_output="$(query_events "$all_calendars" "$calendar" "$title_contains")"
+
+  if [[ -z "$raw_output" ]]; then
+    if [[ "$format" == "json" ]]; then
+      printf '[]\n'
+    fi
+    exit 0
+  fi
+
+  case "$format" in
+    json)
+      json_from_records "$raw_output"
       ;;
-    1)
-      calendar="$1"
-      ;;
-    3)
-      calendar="$1"
-      start="$2"
-      end="$3"
+    tsv)
+      printf 'id\tcalendar\ttitle\tstart\tend\tlocation\tnotes\turl\talarm\trecurrence\n'
+      python3 - "$raw_output" <<'PY'
+import sys
+field_delim = "\034"
+record_delim = "\036"
+for raw_record in sys.argv[1].split(record_delim):
+    if not raw_record.strip():
+        continue
+    print(raw_record.replace(field_delim, "\t"))
+PY
       ;;
     *)
-      usage
-      exit 1
+      event_records_to_table "$raw_output" 0
       ;;
   esac
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
 fi
-
-if [[ $list_only -eq 1 ]]; then
-  list_calendars
-  exit 0
-fi
-
-[[ "$format" == "table" || "$format" == "tsv" ]] || die "unsupported format '$format' (use table or tsv)"
-
-if [[ -z "$start" ]]; then
-  start="$(date '+%Y-%m-%d 00:00')"
-fi
-
-if [[ -z "$end" ]]; then
-  end="$(date -j -v+7d -f "%Y-%m-%d %H:%M" "$start" '+%Y-%m-%d %H:%M')"
-fi
-
-validate_datetime "$start"
-validate_datetime "$end"
-
-start_epoch="$(date -j -f "%Y-%m-%d %H:%M" "$start" "+%s")"
-end_epoch="$(date -j -f "%Y-%m-%d %H:%M" "$end" "+%s")"
-
-if [[ "$end_epoch" -le "$start_epoch" ]]; then
-  die "end time must be after start time"
-fi
-
-raw_output="$(
-  osascript \
-    -e 'on run argv' \
-    -e 'set includeAllCalendars to item 1 of argv' \
-    -e 'set selectedCalendar to item 2 of argv' \
-    -e 'set startString to item 3 of argv' \
-    -e 'set endString to item 4 of argv' \
-    -e 'set text item delimiters to {"-", " ", ":"}' \
-    -e 'set startParts to text items of startString' \
-    -e 'set endParts to text items of endString' \
-    -e 'set text item delimiters to ""' \
-    -e 'set startDate to current date' \
-    -e 'set year of startDate to (item 1 of startParts) as integer' \
-    -e 'set month of startDate to (item 2 of startParts) as integer' \
-    -e 'set day of startDate to (item 3 of startParts) as integer' \
-    -e 'set time of startDate to (((item 4 of startParts) as integer) * hours) + (((item 5 of startParts) as integer) * minutes)' \
-    -e 'set endDate to current date' \
-    -e 'set year of endDate to (item 1 of endParts) as integer' \
-    -e 'set month of endDate to (item 2 of endParts) as integer' \
-    -e 'set day of endDate to (item 3 of endParts) as integer' \
-    -e 'set time of endDate to (((item 4 of endParts) as integer) * hours) + (((item 5 of endParts) as integer) * minutes)' \
-    -e 'set outputLines to {}' \
-    -e 'tell application "Calendar"' \
-    -e 'if includeAllCalendars is "0" and not (exists calendar selectedCalendar) then error "Calendar not found: " & selectedCalendar' \
-    -e 'if includeAllCalendars is "1" then' \
-    -e 'set selectedCalendars to every calendar' \
-    -e 'else' \
-    -e 'set selectedCalendars to {calendar selectedCalendar}' \
-    -e 'end if' \
-    -e 'repeat with cal in selectedCalendars' \
-    -e 'repeat with evt in (every event of cal whose start date < endDate and end date > startDate)' \
-    -e 'set lineText to (id of evt) & tab & (name of cal) & tab & (summary of evt) & tab & ((start date of evt) as string) & tab & ((end date of evt) as string)' \
-    -e 'set end of outputLines to lineText' \
-    -e 'end repeat' \
-    -e 'end repeat' \
-    -e 'end tell' \
-    -e 'set text item delimiters to linefeed' \
-    -e 'return outputLines as text' \
-    -e 'end run' \
-    -- \
-    "$all_calendars" "$calendar" "$start" "$end"
-)"
-
-if [[ -z "$raw_output" ]]; then
-  exit 0
-fi
-
-if [[ "$format" == "tsv" ]]; then
-  printf 'id\tcalendar\ttitle\tstart\tend\n'
-  printf '%s\n' "$raw_output"
-  exit 0
-fi
-
-while IFS=$'\t' read -r event_id event_calendar event_title event_start event_end; do
-  [[ -n "$event_id" ]] || continue
-  printf '[%s] %s | %s | %s -> %s\n' \
-    "$event_calendar" "$event_title" "$event_id" "$event_start" "$event_end"
-done <<< "$raw_output"

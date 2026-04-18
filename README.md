@@ -7,6 +7,9 @@ Use Apple Calendar and iCloud calendars on macOS through a small set of non-inte
 - `addcal`
 - `listcal`
 - `delcal`
+- `editcal`
+- `showcal`
+- `batchcal`
 
 Built for Codex, Claude Code, Hermes, and any local agent that can run shell commands.
 
@@ -55,7 +58,7 @@ That means:
 - **Uses the real Apple Calendar**: events land in Calendar.app, not in a sidecar file format
 - **iCloud-native through the OS**: if Calendar.app already syncs, these commands sync too
 - **Much simpler than CalDAV stacks**: no `vdirsyncer`, no `khal` config, no separate sync troubleshooting
-- **Small surface area**: three commands are easy to audit, script, and extend
+- **Small surface area**: a compact set of focused commands is easy to audit, script, and extend
 
 ## What This Solves
 
@@ -97,6 +100,10 @@ The first run may trigger a macOS Calendar automation prompt. If that happens, a
 - `addcal`: create events
 - `listcal`: list events
 - `delcal`: delete events
+- `editcal`: edit an event by id
+- `showcal`: inspect one event by id
+- `batchcal`: dry-run or apply a JSON event plan
+- `calendar-lib.sh`: shared helper library for the CLI scripts
 
 This repository is meant to be self-contained: publish the docs and the three CLI scripts together.
 
@@ -106,8 +113,8 @@ Clone the repo, then copy the three scripts into a directory on your `PATH`:
 
 ```bash
 mkdir -p ~/.local/bin
-cp addcal listcal delcal ~/.local/bin/
-chmod +x ~/.local/bin/addcal ~/.local/bin/listcal ~/.local/bin/delcal
+cp addcal listcal delcal editcal showcal batchcal calendar-lib.sh ~/.local/bin/
+chmod +x ~/.local/bin/addcal ~/.local/bin/listcal ~/.local/bin/delcal ~/.local/bin/editcal ~/.local/bin/showcal ~/.local/bin/batchcal
 ```
 
 Verify:
@@ -115,6 +122,7 @@ Verify:
 ```bash
 addcal --list-calendars
 listcal --list-calendars
+showcal --help
 ```
 
 If macOS asks for Calendar automation permission, allow it for the terminal or agent app you are using.
@@ -142,6 +150,8 @@ Structured form:
 ```bash
 addcal --calendar "Personal" --start "2026-04-18 19:00" --end "2026-04-18 20:00" --title "Dinner"
 addcal --bucket work --start "2026-04-18 09:00" --end "2026-04-18 09:30" --title "Team standup"
+addcal --calendar "Personal" --start "today 18:00" --end "today 19:00" --title "Dinner" --location "Mall" --notes "Booked" --alarm 15
+addcal --calendar "Personal" --start "2026-04-18 18:00" --end "2026-04-18 19:00" --title "Gym" --repeat "weekly 1,3,5"
 ```
 
 Routing is intentionally simple: `--calendar` wins when the exact destination is known, and `--bucket` (`personal`, `work`, or `life`) is only a hint for picking a likely calendar. It first prefers mapped calendars such as `个人`/`Personal`, `工作`/`Work`, or `生活`/`Life`, then falls back to the default calendar if no match exists. This CLI does not try to understand full natural-language requests.
@@ -153,6 +163,8 @@ listcal
 listcal "Personal"
 listcal "Personal" "2026-04-18 00:00" "2026-04-19 00:00"
 listcal --all-calendars --start "2026-04-18 00:00" --end "2026-04-19 00:00" --format tsv
+listcal --today --format json
+listcal --this-week --title-contains "Gym"
 ```
 
 For agents, prefer TSV output:
@@ -164,7 +176,21 @@ listcal --calendar "Personal" --start "2026-04-18 00:00" --end "2026-04-19 00:00
 Columns:
 
 ```text
-id    calendar    title    start    end
+id    calendar    title    start    end    location    notes    url    alarm    recurrence
+```
+
+### Show one event
+
+```bash
+showcal --id "0243912F-0D42-4477-A193-A881F73E7434"
+showcal --id "0243912F-0D42-4477-A193-A881F73E7434" --format json
+```
+
+### Edit an event
+
+```bash
+editcal --id "0243912F-0D42-4477-A193-A881F73E7434" --start "2026-04-18 21:00" --end "2026-04-18 22:00"
+editcal --id "0243912F-0D42-4477-A193-A881F73E7434" --title "剪辑视频v2" --alarm 10 --dry-run
 ```
 
 ### Delete events
@@ -187,14 +213,24 @@ Preview before deleting:
 delcal --calendar "Personal" --title "Dinner" --start "2026-04-18 19:00" --end "2026-04-18 20:00" --dry-run
 ```
 
+### Batch import from JSON
+
+```bash
+batchcal --plan semester.json --dry-run
+batchcal --plan semester.json --apply
+cat birthdays.json | batchcal --stdin --dry-run
+```
+
 ## Recommended Agent Workflow
 
 1. Use `--calendar` when the exact destination calendar is known.
 2. Use `--bucket` to hint at a likely destination when the exact calendar is not known.
 3. Run `listcal --list-calendars` if the choice is still unclear.
 4. Use `addcal` to create events.
-5. Use `listcal --format tsv` to inspect events and capture event ids.
-6. Use `delcal --id ...` for reliable deletion.
+5. Use `listcal --format tsv` or `showcal --format json` to inspect events and capture event ids.
+6. Use `editcal --id ...` for safe updates.
+7. Use `delcal --id ...` for reliable deletion.
+8. Use `batchcal --dry-run` before large imports.
 
 For automation, prefer deletion by event id rather than by title only.
 
@@ -225,7 +261,7 @@ But if the user's machine is a Mac and the goal is simply to operate the real Ap
 
 - macOS only
 - depends on Calendar.app and AppleScript
-- datetime input format is `YYYY-MM-DD HH:MM`
+- datetime input format accepts `YYYY-MM-DD HH:MM` plus light shortcuts like `today 18:00`, `tomorrow 9am`, and `+2h`
 - list output timestamps come from AppleScript / system locale formatting
 - this is for real Calendar.app data, not standalone `.ics` files
 
