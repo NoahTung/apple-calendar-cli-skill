@@ -21,6 +21,16 @@ main() {
   local title=""
   local start=""
   local end=""
+  local start_year=""
+  local start_month=""
+  local start_day=""
+  local start_hour=""
+  local start_minute=""
+  local end_year=""
+  local end_month=""
+  local end_day=""
+  local end_hour=""
+  local end_minute=""
   local dry_run=0
   local result=""
 
@@ -78,19 +88,47 @@ main() {
     [[ -n "$title" ]] || calendar_die "missing --title"
     [[ -n "$start" ]] || calendar_die "missing --start"
     [[ -n "$end" ]] || calendar_die "missing --end"
-    start="$(parse_datetime_expression "$start")"
-    end="$(parse_datetime_expression "$end")"
+    parse_datetime "$start" start
+    parse_datetime "$end" end
   fi
 
   result="$(
-    osascript - "$calendar" "$event_id" "$title" "$start" "$end" "$dry_run" <<'APPLESCRIPT'
+    osascript - "$calendar" "$event_id" "$title" "$dry_run" \
+      "$start_year" "$start_month" "$start_day" "$start_hour" "$start_minute" \
+      "$end_year" "$end_month" "$end_day" "$end_hour" "$end_minute" <<'APPLESCRIPT'
+on replaceText(inputValue, findValue, replaceValue)
+  set originalDelims to AppleScript's text item delimiters
+  set AppleScript's text item delimiters to findValue
+  set parts to every text item of (inputValue as text)
+  set AppleScript's text item delimiters to replaceValue
+  set normalizedValue to parts as text
+  set AppleScript's text item delimiters to originalDelims
+  return normalizedValue
+end replaceText
+
+on safeTitle(inputValue)
+  set normalizedValue to inputValue as text
+  set normalizedValue to my replaceText(normalizedValue, return, " ")
+  set normalizedValue to my replaceText(normalizedValue, linefeed, " ")
+  set normalizedValue to my replaceText(normalizedValue, tab, " ")
+  return normalizedValue
+end safeTitle
+
 on run argv
   set calendarName to item 1 of argv
   set targetEventId to item 2 of argv
   set targetTitle to item 3 of argv
-  set startString to item 4 of argv
-  set endString to item 5 of argv
-  set dryRunValue to item 6 of argv
+  set dryRunValue to item 4 of argv
+  set startYear to item 5 of argv
+  set startMonth to item 6 of argv
+  set startDay to item 7 of argv
+  set startHour to item 8 of argv
+  set startMinute to item 9 of argv
+  set endYear to item 10 of argv
+  set endMonth to item 11 of argv
+  set endDay to item 12 of argv
+  set endHour to item 13 of argv
+  set endMinute to item 14 of argv
 
   tell application "Calendar"
     if targetEventId is not "" then
@@ -103,27 +141,29 @@ on run argv
         end if
       end repeat
     else
-      if not (exists calendar calendarName) then error "Calendar not found: " & calendarName
-      set text item delimiters to {"-", " ", ":"}
-      set startParts to text items of startString
-      set endParts to text items of endString
-      set text item delimiters to ""
+      set matchingCalendars to every calendar whose name is calendarName
+      if (count of matchingCalendars) is 0 then error "Calendar not found: " & calendarName
       set startDate to current date
-      set year of startDate to (item 1 of startParts) as integer
-      set month of startDate to (item 2 of startParts) as integer
-      set day of startDate to (item 3 of startParts) as integer
-      set time of startDate to (((item 4 of startParts) as integer) * hours) + (((item 5 of startParts) as integer) * minutes)
+      set day of startDate to 1
+      set year of startDate to startYear as integer
+      set month of startDate to startMonth as integer
+      set day of startDate to startDay as integer
+      set time of startDate to ((startHour as integer) * hours) + ((startMinute as integer) * minutes)
+      set seconds of startDate to 0
+
       set endDate to current date
-      set year of endDate to (item 1 of endParts) as integer
-      set month of endDate to (item 2 of endParts) as integer
-      set day of endDate to (item 3 of endParts) as integer
-      set time of endDate to (((item 4 of endParts) as integer) * hours) + (((item 5 of endParts) as integer) * minutes)
-      set matchedEvents to every event of calendar calendarName whose summary is targetTitle and start date = startDate and end date = endDate
+      set day of endDate to 1
+      set year of endDate to endYear as integer
+      set month of endDate to endMonth as integer
+      set day of endDate to endDay as integer
+      set time of endDate to ((endHour as integer) * hours) + ((endMinute as integer) * minutes)
+      set seconds of endDate to 0
+      set matchedEvents to every event of first item of matchingCalendars whose summary is targetTitle and start date = startDate and end date = endDate
     end if
 
     set outputText to ""
     repeat with evt in matchedEvents
-      set outputText to outputText & (id of evt) & tab & (summary of evt) & linefeed
+      set outputText to outputText & (id of evt) & tab & my safeTitle(summary of evt) & linefeed
       if dryRunValue is "0" then delete evt
     end repeat
     return outputText

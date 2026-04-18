@@ -34,20 +34,10 @@ normalize_plan() {
 
   python3 - "$raw_json" <<'PY' || exit 1
 import json
-import re
 import sys
 
 raw_json = sys.argv[1]
 plan = json.loads(raw_json)
-
-def validate_datetime_expr(value: str) -> bool:
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", value):
-        return True
-    if re.fullmatch(r"(today|tomorrow)\s+\d{1,2}(?::\d{2})?\s*([ap]m)?", value, flags=re.IGNORECASE):
-        return True
-    if re.fullmatch(r"\+\d+[hmHM]", value):
-        return True
-    return False
 
 defaults = {
     "calendar": plan.get("calendar", ""),
@@ -72,10 +62,6 @@ for index, event in enumerate(events, start=1):
     end = merged.get("end", "")
     if not start or not end:
         raise SystemExit(f"batchcal: event #{index} is missing start/end")
-    if not validate_datetime_expr(start):
-        raise SystemExit(f"batchcal: event #{index} has invalid start '{start}'")
-    if not validate_datetime_expr(end):
-        raise SystemExit(f"batchcal: event #{index} has invalid end '{end}'")
     if event_type not in {"single", "recurring"}:
         raise SystemExit(f"batchcal: event #{index} has unsupported type '{event_type}'")
     recurrence = merged.get("recurrence", "")
@@ -99,6 +85,79 @@ for index, event in enumerate(events, start=1):
 
 print(json.dumps(normalized, ensure_ascii=False))
 PY
+}
+
+iter_plan_items() {
+  local normalized_json="$1"
+
+  python3 - "$normalized_json" <<'PY'
+import json
+import sys
+
+for item in json.loads(sys.argv[1]):
+    print(json.dumps(item, ensure_ascii=False))
+PY
+}
+
+read_plan_item_fields() {
+  local item_json="$1"
+
+  {
+    IFS= read -r -d '' plan_index
+    IFS= read -r -d '' plan_type
+    IFS= read -r -d '' plan_title
+    IFS= read -r -d '' plan_start
+    IFS= read -r -d '' plan_end
+    IFS= read -r -d '' plan_calendar
+    IFS= read -r -d '' plan_bucket
+    IFS= read -r -d '' plan_location
+    IFS= read -r -d '' plan_notes
+    IFS= read -r -d '' plan_url
+    IFS= read -r -d '' plan_alarm
+    IFS= read -r -d '' plan_repeat
+    IFS= read -r -d '' plan_source_key
+    IFS= read -r -d '' plan_timezone
+  } < <(
+    python3 - "$item_json" <<'PY'
+import json
+import sys
+
+item = json.loads(sys.argv[1])
+fields = [
+    str(item.get("index", "")),
+    item.get("type", ""),
+    item.get("title", ""),
+    item.get("start", ""),
+    item.get("end", ""),
+    item.get("calendar", ""),
+    item.get("bucket", ""),
+    item.get("location", ""),
+    item.get("notes", ""),
+    item.get("url", ""),
+    item.get("alarm", ""),
+    item.get("repeat", ""),
+    item.get("source_key", ""),
+    item.get("timezone", ""),
+]
+for value in fields:
+    sys.stdout.write((value if value is not None else "") + "\0")
+PY
+  )
+}
+
+validate_plan_items() {
+  local normalized_json="$1"
+  local item_json=""
+
+  while IFS= read -r item_json; do
+    [[ -n "$item_json" ]] || continue
+    read_plan_item_fields "$item_json"
+    parse_datetime_expression "$plan_start" >/dev/null
+    parse_datetime_expression "$plan_end" >/dev/null
+    if [[ -n "$plan_repeat" ]]; then
+      normalize_repeat "$plan_repeat" >/dev/null
+    fi
+  done < <(iter_plan_items "$normalized_json")
 }
 
 main() {
@@ -148,6 +207,7 @@ main() {
     raw_json="$(load_plan stdin "")"
   fi
   normalized_json="$(normalize_plan "$raw_json")"
+  validate_plan_items "$normalized_json"
 
   if [[ "$do_dry_run" -eq 1 ]]; then
     python3 - "$normalized_json" <<'PY'
@@ -166,34 +226,20 @@ PY
     exit 0
   fi
 
-  python3 - "$normalized_json" <<'PY' | while IFS=$'\t' read -r title start end calendar bucket location notes url alarm repeat; do
-import json
-import sys
-items = json.loads(sys.argv[1])
-for item in items:
-    print("\t".join([
-        item["title"],
-        item["start"],
-        item["end"],
-        item["calendar"],
-        item["bucket"],
-        item["location"],
-        item["notes"],
-        item["url"],
-        item["alarm"],
-        item["repeat"],
-    ]))
-PY
-    cmd=("$repo_root/addcal" --start "$start" --end "$end" --title "$title")
-    [[ -n "$calendar" ]] && cmd+=(--calendar "$calendar")
-    [[ -n "$bucket" ]] && cmd+=(--bucket "$bucket")
-    [[ -n "$location" ]] && cmd+=(--location "$location")
-    [[ -n "$notes" ]] && cmd+=(--notes "$notes")
-    [[ -n "$url" ]] && cmd+=(--url "$url")
-    [[ -n "$alarm" ]] && cmd+=(--alarm "$alarm")
-    [[ -n "$repeat" ]] && cmd+=(--repeat "$repeat")
+  while IFS= read -r item_json; do
+    [[ -n "$item_json" ]] || continue
+    read_plan_item_fields "$item_json"
+
+    cmd=("$repo_root/addcal" --start "$plan_start" --end "$plan_end" --title "$plan_title")
+    [[ -n "$plan_calendar" ]] && cmd+=(--calendar "$plan_calendar")
+    [[ -n "$plan_bucket" ]] && cmd+=(--bucket "$plan_bucket")
+    [[ -n "$plan_location" ]] && cmd+=(--location "$plan_location")
+    [[ -n "$plan_notes" ]] && cmd+=(--notes "$plan_notes")
+    [[ -n "$plan_url" ]] && cmd+=(--url "$plan_url")
+    [[ -n "$plan_alarm" ]] && cmd+=(--alarm "$plan_alarm")
+    [[ -n "$plan_repeat" ]] && cmd+=(--repeat "$plan_repeat")
     "${cmd[@]}"
-  done
+  done < <(iter_plan_items "$normalized_json")
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

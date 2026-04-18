@@ -264,6 +264,7 @@ But if the user's machine is a Mac and the goal is simply to operate the real Ap
 - datetime input format accepts `YYYY-MM-DD HH:MM` plus light shortcuts like `today 18:00`, `tomorrow 9am`, and `+2h`
 - list output timestamps come from AppleScript / system locale formatting
 - this is for real Calendar.app data, not standalone `.ics` files
+- alarm handling is still centered on `display alarm`; other alarm types such as audio, email, or open-file alarms are not fully preserved across read/edit flows
 
 ## Publishing Notes
 

@@ -26,14 +26,34 @@ EOF
 
 check_conflicts() {
   local calendar="$1"
-  local start="$2"
-  local end="$3"
+  local start_year="$2"
+  local start_month="$3"
+  local start_day="$4"
+  local start_hour="$5"
+  local start_minute="$6"
+  local end_year="$7"
+  local end_month="$8"
+  local end_day="$9"
+  local end_hour="${10}"
+  local end_minute="${11}"
 
-  osascript - "$calendar" "$start" "$end" "$FIELD_DELIM" "$RECORD_DELIM" <<'APPLESCRIPT'
+  osascript - "$calendar" "$FIELD_DELIM" "$RECORD_DELIM" \
+    "$start_year" "$start_month" "$start_day" "$start_hour" "$start_minute" \
+    "$end_year" "$end_month" "$end_day" "$end_hour" "$end_minute" <<'APPLESCRIPT'
 on pad2(n)
   if n < 10 then return "0" & (n as text)
   return n as text
 end pad2
+
+on replaceText(inputValue, findValue, replaceValue)
+  set originalDelims to AppleScript's text item delimiters
+  set AppleScript's text item delimiters to findValue
+  set parts to every text item of (inputValue as text)
+  set AppleScript's text item delimiters to replaceValue
+  set normalizedValue to parts as text
+  set AppleScript's text item delimiters to originalDelims
+  return normalizedValue
+end replaceText
 
 on isoDate(theDate)
   set y to year of theDate as integer
@@ -44,43 +64,51 @@ on isoDate(theDate)
   return (y as text) & "-" & m & "-" & d & " " & h & ":" & minValue
 end isoDate
 
-on safeText(inputValue)
-  set originalDelims to AppleScript's text item delimiters
-  set AppleScript's text item delimiters to return
-  set parts to every text item of (inputValue as text)
-  set AppleScript's text item delimiters to "\\n"
-  set normalizedValue to parts as text
-  set AppleScript's text item delimiters to originalDelims
+on safeText(inputValue, fieldDelim, recordDelim)
+  set normalizedValue to inputValue as text
+  set normalizedValue to my replaceText(normalizedValue, return, " ")
+  set normalizedValue to my replaceText(normalizedValue, linefeed, " ")
+  set normalizedValue to my replaceText(normalizedValue, tab, " ")
+  set normalizedValue to my replaceText(normalizedValue, fieldDelim, " ")
+  set normalizedValue to my replaceText(normalizedValue, recordDelim, " ")
   return normalizedValue
 end safeText
 
 on run argv
   set calendarName to item 1 of argv
-  set startString to item 2 of argv
-  set endString to item 3 of argv
-  set fieldDelim to item 4 of argv
-  set recordDelim to item 5 of argv
-
-  set text item delimiters to {"-", " ", ":"}
-  set startParts to text items of startString
-  set endParts to text items of endString
-  set text item delimiters to ""
+  set fieldDelim to item 2 of argv
+  set recordDelim to item 3 of argv
+  set startYear to (item 4 of argv) as integer
+  set startMonth to (item 5 of argv) as integer
+  set startDay to (item 6 of argv) as integer
+  set startHour to (item 7 of argv) as integer
+  set startMinute to (item 8 of argv) as integer
+  set endYear to (item 9 of argv) as integer
+  set endMonth to (item 10 of argv) as integer
+  set endDay to (item 11 of argv) as integer
+  set endHour to (item 12 of argv) as integer
+  set endMinute to (item 13 of argv) as integer
 
   set startDate to current date
-  set year of startDate to (item 1 of startParts) as integer
-  set month of startDate to (item 2 of startParts) as integer
-  set day of startDate to (item 3 of startParts) as integer
-  set time of startDate to (((item 4 of startParts) as integer) * hours) + (((item 5 of startParts) as integer) * minutes)
+  set day of startDate to 1
+  set year of startDate to startYear
+  set month of startDate to startMonth
+  set day of startDate to startDay
+  set time of startDate to (startHour * hours) + (startMinute * minutes)
+  set seconds of startDate to 0
 
   set endDate to current date
-  set year of endDate to (item 1 of endParts) as integer
-  set month of endDate to (item 2 of endParts) as integer
-  set day of endDate to (item 3 of endParts) as integer
-  set time of endDate to (((item 4 of endParts) as integer) * hours) + (((item 5 of endParts) as integer) * minutes)
+  set day of endDate to 1
+  set year of endDate to endYear
+  set month of endDate to endMonth
+  set day of endDate to endDay
+  set time of endDate to (endHour * hours) + (endMinute * minutes)
+  set seconds of endDate to 0
 
   tell application "Calendar"
-    if not (exists calendar calendarName) then error "Calendar not found: " & calendarName
-    set cal to calendar calendarName
+    set matchingCalendars to every calendar whose name is calendarName
+    if (count of matchingCalendars) is 0 then error "Calendar not found: " & calendarName
+    set cal to first item of matchingCalendars
     set outputText to ""
 
     repeat with evt in (every event of cal whose start date < endDate and end date > startDate)
@@ -104,7 +132,7 @@ on run argv
       try
         set recurrenceValue to recurrence of evt
       end try
-      set recordText to (id of evt) & fieldDelim & (name of cal) & fieldDelim & my safeText(summary of evt) & fieldDelim & my isoDate(start date of evt) & fieldDelim & my isoDate(end date of evt) & fieldDelim & my safeText(eventLocation) & fieldDelim & my safeText(eventNotes) & fieldDelim & my safeText(eventURL) & fieldDelim & (alarmValue as text) & fieldDelim & my safeText(recurrenceValue)
+      set recordText to (id of evt) & fieldDelim & (name of cal) & fieldDelim & my safeText(summary of evt, fieldDelim, recordDelim) & fieldDelim & my isoDate(start date of evt) & fieldDelim & my isoDate(end date of evt) & fieldDelim & my safeText(eventLocation, fieldDelim, recordDelim) & fieldDelim & my safeText(eventNotes, fieldDelim, recordDelim) & fieldDelim & my safeText(eventURL, fieldDelim, recordDelim) & fieldDelim & (alarmValue as text) & fieldDelim & my safeText(recurrenceValue, fieldDelim, recordDelim)
       set outputText to outputText & recordText & recordDelim
     end repeat
 
@@ -266,52 +294,59 @@ main() {
   recurrence="$(normalize_repeat "$repeat_spec")"
 
   if [[ "$check_conflict" -eq 1 ]]; then
-    conflicts="$(check_conflicts "$calendar" "$start_normalized" "$end_normalized")"
+    conflicts="$(check_conflicts "$calendar" \
+      "$start_year" "$start_month" "$start_day" "$start_hour" "$start_minute" \
+      "$end_year" "$end_month" "$end_day" "$end_hour" "$end_minute")"
     if [[ -n "$conflicts" ]]; then
-      conflict_count="$(
-        python3 - <<'PY' "$conflicts"
-import sys
-print(sum(1 for part in sys.argv[1].split("\036") if part.strip()))
-PY
-      )"
+      conflict_count="$(count_records "$conflicts")"
       printf 'Warning: %s overlapping event(s) in %s\n' "$conflict_count" "$calendar" >&2
       event_records_to_table "$conflicts" 0 >&2
     fi
   fi
 
   event_id="$(
-    osascript - "$calendar" "$title" "$start_normalized" "$end_normalized" "$location" "$notes" "$url" "$alarm" "$recurrence" <<'APPLESCRIPT'
+    osascript - "$calendar" "$title" "$location" "$notes" "$url" "$alarm" "$recurrence" \
+      "$start_year" "$start_month" "$start_day" "$start_hour" "$start_minute" \
+      "$end_year" "$end_month" "$end_day" "$end_hour" "$end_minute" <<'APPLESCRIPT'
 on run argv
   set calendarName to item 1 of argv
   set eventTitle to item 2 of argv
-  set startString to item 3 of argv
-  set endString to item 4 of argv
-  set locationValue to item 5 of argv
-  set notesValue to item 6 of argv
-  set urlValue to item 7 of argv
-  set alarmValue to item 8 of argv
-  set recurrenceValue to item 9 of argv
-
-  set text item delimiters to {"-", " ", ":"}
-  set startParts to text items of startString
-  set endParts to text items of endString
-  set text item delimiters to ""
+  set locationValue to item 3 of argv
+  set notesValue to item 4 of argv
+  set urlValue to item 5 of argv
+  set alarmValue to item 6 of argv
+  set recurrenceValue to item 7 of argv
+  set startYear to (item 8 of argv) as integer
+  set startMonth to (item 9 of argv) as integer
+  set startDay to (item 10 of argv) as integer
+  set startHour to (item 11 of argv) as integer
+  set startMinute to (item 12 of argv) as integer
+  set endYear to (item 13 of argv) as integer
+  set endMonth to (item 14 of argv) as integer
+  set endDay to (item 15 of argv) as integer
+  set endHour to (item 16 of argv) as integer
+  set endMinute to (item 17 of argv) as integer
 
   set startDate to current date
-  set year of startDate to (item 1 of startParts) as integer
-  set month of startDate to (item 2 of startParts) as integer
-  set day of startDate to (item 3 of startParts) as integer
-  set time of startDate to (((item 4 of startParts) as integer) * hours) + (((item 5 of startParts) as integer) * minutes)
+  set day of startDate to 1
+  set year of startDate to startYear
+  set month of startDate to startMonth
+  set day of startDate to startDay
+  set time of startDate to (startHour * hours) + (startMinute * minutes)
+  set seconds of startDate to 0
 
   set endDate to current date
-  set year of endDate to (item 1 of endParts) as integer
-  set month of endDate to (item 2 of endParts) as integer
-  set day of endDate to (item 3 of endParts) as integer
-  set time of endDate to (((item 4 of endParts) as integer) * hours) + (((item 5 of endParts) as integer) * minutes)
+  set day of endDate to 1
+  set year of endDate to endYear
+  set month of endDate to endMonth
+  set day of endDate to endDay
+  set time of endDate to (endHour * hours) + (endMinute * minutes)
+  set seconds of endDate to 0
 
   tell application "Calendar"
-    if not (exists calendar calendarName) then error "Calendar not found: " & calendarName
-    tell calendar calendarName
+    set matchingCalendars to every calendar whose name is calendarName
+    if (count of matchingCalendars) is 0 then error "Calendar not found: " & calendarName
+    tell first item of matchingCalendars
       set newEvent to make new event with properties {summary:eventTitle, start date:startDate, end date:endDate}
       if locationValue is not "" then set location of newEvent to locationValue
       if notesValue is not "" then set description of newEvent to notesValue

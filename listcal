@@ -31,6 +31,16 @@ on pad2(n)
   return n as text
 end pad2
 
+on replaceText(inputValue, findValue, replaceValue)
+  set originalDelims to AppleScript's text item delimiters
+  set AppleScript's text item delimiters to findValue
+  set parts to every text item of (inputValue as text)
+  set AppleScript's text item delimiters to replaceValue
+  set normalizedValue to parts as text
+  set AppleScript's text item delimiters to originalDelims
+  return normalizedValue
+end replaceText
+
 on isoDate(theDate)
   set y to year of theDate as integer
   set m to my pad2(month of theDate as integer)
@@ -40,13 +50,13 @@ on isoDate(theDate)
   return (y as text) & "-" & m & "-" & d & " " & h & ":" & minValue
 end isoDate
 
-on safeText(inputValue)
-  set originalDelims to AppleScript's text item delimiters
-  set AppleScript's text item delimiters to return
-  set parts to every text item of (inputValue as text)
-  set AppleScript's text item delimiters to "\\n"
-  set normalizedValue to parts as text
-  set AppleScript's text item delimiters to originalDelims
+on safeText(inputValue, fieldDelim, recordDelim)
+  set normalizedValue to inputValue as text
+  set normalizedValue to my replaceText(normalizedValue, return, " ")
+  set normalizedValue to my replaceText(normalizedValue, linefeed, " ")
+  set normalizedValue to my replaceText(normalizedValue, tab, " ")
+  set normalizedValue to my replaceText(normalizedValue, fieldDelim, " ")
+  set normalizedValue to my replaceText(normalizedValue, recordDelim, " ")
   return normalizedValue
 end safeText
 
@@ -68,23 +78,27 @@ on run argv
   set endMinute to (item 15 of argv) as integer
 
   set startDate to current date
+  set day of startDate to 1
   set year of startDate to startYear
   set month of startDate to startMonth
   set day of startDate to startDay
   set time of startDate to (startHour * hours) + (startMinute * minutes)
+  set seconds of startDate to 0
 
   set endDate to current date
+  set day of endDate to 1
   set year of endDate to endYear
   set month of endDate to endMonth
   set day of endDate to endDay
   set time of endDate to (endHour * hours) + (endMinute * minutes)
+  set seconds of endDate to 0
 
   tell application "Calendar"
-    if includeAllCalendars is "0" and not (exists calendar selectedCalendar) then error "Calendar not found: " & selectedCalendar
     if includeAllCalendars is "1" then
       set selectedCalendars to every calendar
     else
-      set selectedCalendars to {calendar selectedCalendar}
+      set selectedCalendars to every calendar whose name is selectedCalendar
+      if (count of selectedCalendars) is 0 then error "Calendar not found: " & selectedCalendar
     end if
 
     set outputText to ""
@@ -113,7 +127,7 @@ on run argv
           try
             set recurrenceValue to recurrence of evt
           end try
-          set recordText to (id of evt) & fieldDelim & (name of cal) & fieldDelim & my safeText(eventTitle) & fieldDelim & my isoDate(start date of evt) & fieldDelim & my isoDate(end date of evt) & fieldDelim & my safeText(eventLocation) & fieldDelim & my safeText(eventNotes) & fieldDelim & my safeText(eventURL) & fieldDelim & (alarmValue as text) & fieldDelim & my safeText(recurrenceValue)
+          set recordText to (id of evt) & fieldDelim & (name of cal) & fieldDelim & my safeText(eventTitle, fieldDelim, recordDelim) & fieldDelim & my isoDate(start date of evt) & fieldDelim & my isoDate(end date of evt) & fieldDelim & my safeText(eventLocation, fieldDelim, recordDelim) & fieldDelim & my safeText(eventNotes, fieldDelim, recordDelim) & fieldDelim & my safeText(eventURL, fieldDelim, recordDelim) & fieldDelim & (alarmValue as text) & fieldDelim & my safeText(recurrenceValue, fieldDelim, recordDelim)
           set outputText to outputText & recordText & recordDelim
         end if
       end repeat
@@ -140,13 +154,7 @@ main() {
       IFS= read -r start
       IFS= read -r _
     } < <(compute_range_from_preset today)
-    end="$(python3 - "$start" <<'PY'
-from datetime import datetime, timedelta
-import sys
-dt = datetime.strptime(sys.argv[1], "%Y-%m-%d %H:%M")
-print((dt + timedelta(days=7)).strftime("%Y-%m-%d %H:%M"))
-PY
-)"
+    end="$(default_end_from_start "$start")"
   fi
 
   if [[ $# -gt 0 && ( "$1" == "--help" || "$1" == "-h" ) ]]; then
@@ -211,6 +219,10 @@ PY
       1)
         calendar="$1"
         ;;
+      2)
+        calendar="$1"
+        start="$2"
+        ;;
       3)
         calendar="$1"
         start="$2"
@@ -251,15 +263,7 @@ PY
   fi
 
   if [[ -z "$end" ]]; then
-    end="$(
-      python3 - "$start" <<'PY'
-from datetime import datetime, timedelta
-import sys
-
-dt = datetime.strptime(sys.argv[1], "%Y-%m-%d %H:%M")
-print((dt + timedelta(days=7)).strftime("%Y-%m-%d %H:%M"))
-PY
-    )"
+    end="$(default_end_from_start "$start")"
   else
     end="$(parse_datetime_expression "$end")"
   fi

@@ -30,6 +30,7 @@ assert_eq "2026-04-18 18:00" "$(parse_datetime_expression "today 18:00")" "parse
 assert_eq "2026-04-19 09:00" "$(parse_datetime_expression "tomorrow 9am")" "parses tomorrow am time"
 assert_eq "2026-04-18 12:00" "$(parse_datetime_expression "+2h")" "parses relative hours"
 assert_eq "2026-04-18 10:30" "$(parse_datetime_expression "+30m")" "parses relative minutes"
+assert_eq "2026-04-25 18:00" "$(default_end_from_start "2026-04-18 18:00")" "defaults end to seven days later"
 
 {
   IFS= read -r today_start
@@ -54,5 +55,6 @@ json_output="$(json_from_records $'evt-1\034Work\034Title\0342026-04-18 09:00\03
 assert_contains "$json_output" '"id": "evt-1"' "json output includes id"
 assert_contains "$json_output" '"location": "Office"' "json output includes location"
 assert_contains "$json_output" '"alarm": "-15"' "json output includes alarm"
+assert_eq "1" "$(count_records $'evt-1\034Work\034Title\036')" "counts one encoded record"
 
 printf 'calendar lib tests passed\n'

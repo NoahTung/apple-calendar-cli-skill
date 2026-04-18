@@ -132,6 +132,16 @@ on pad2(n)
   return n as text
 end pad2
 
+on replaceText(inputValue, findValue, replaceValue)
+  set originalDelims to AppleScript's text item delimiters
+  set AppleScript's text item delimiters to findValue
+  set parts to every text item of (inputValue as text)
+  set AppleScript's text item delimiters to replaceValue
+  set normalizedValue to parts as text
+  set AppleScript's text item delimiters to originalDelims
+  return normalizedValue
+end replaceText
+
 on isoDate(theDate)
   set y to year of theDate as integer
   set m to my pad2(month of theDate as integer)
@@ -141,13 +151,13 @@ on isoDate(theDate)
   return (y as text) & "-" & m & "-" & d & " " & h & ":" & minValue
 end isoDate
 
-on safeText(inputValue)
-  set originalDelims to AppleScript's text item delimiters
-  set AppleScript's text item delimiters to return
-  set parts to every text item of (inputValue as text)
-  set AppleScript's text item delimiters to "\\n"
-  set normalizedValue to parts as text
-  set AppleScript's text item delimiters to originalDelims
+on safeText(inputValue, fieldDelim, recordDelim)
+  set normalizedValue to inputValue as text
+  set normalizedValue to my replaceText(normalizedValue, return, " ")
+  set normalizedValue to my replaceText(normalizedValue, linefeed, " ")
+  set normalizedValue to my replaceText(normalizedValue, tab, " ")
+  set normalizedValue to my replaceText(normalizedValue, fieldDelim, " ")
+  set normalizedValue to my replaceText(normalizedValue, recordDelim, " ")
   return normalizedValue
 end safeText
 
@@ -172,20 +182,8 @@ on eventRecord(evt, calName, fieldDelim, recordDelim)
   try
     set recurrenceValue to recurrence of evt
   end try
-  return (id of evt) & fieldDelim & calName & fieldDelim & my safeText(summary of evt) & fieldDelim & my isoDate(start date of evt) & fieldDelim & my isoDate(end date of evt) & fieldDelim & my safeText(eventLocation) & fieldDelim & my safeText(eventNotes) & fieldDelim & my safeText(eventURL) & fieldDelim & (alarmValue as text) & fieldDelim & my safeText(recurrenceValue) & recordDelim
+  return (id of evt) & fieldDelim & calName & fieldDelim & my safeText(summary of evt, fieldDelim, recordDelim) & fieldDelim & my isoDate(start date of evt) & fieldDelim & my isoDate(end date of evt) & fieldDelim & my safeText(eventLocation, fieldDelim, recordDelim) & fieldDelim & my safeText(eventNotes, fieldDelim, recordDelim) & fieldDelim & my safeText(eventURL, fieldDelim, recordDelim) & fieldDelim & (alarmValue as text) & fieldDelim & my safeText(recurrenceValue, fieldDelim, recordDelim) & recordDelim
 end eventRecord
-
-on parseDateString(dateString)
-  set text item delimiters to {"-", " ", ":"}
-  set parts to text items of dateString
-  set text item delimiters to ""
-  set outputDate to current date
-  set year of outputDate to (item 1 of parts) as integer
-  set month of outputDate to (item 2 of parts) as integer
-  set day of outputDate to (item 3 of parts) as integer
-  set time of outputDate to (((item 4 of parts) as integer) * hours) + (((item 5 of parts) as integer) * minutes)
-  return outputDate
-end parseDateString
 
 on run argv
   set targetEventId to item 1 of argv
@@ -231,15 +229,38 @@ on run argv
     set targetCalendar to foundCalendar
 
     if newTitle is not "" then set effectiveTitle to newTitle
-    if newStartString is not "" then set effectiveStart to my parseDateString(newStartString)
-    if newEndString is not "" then set effectiveEnd to my parseDateString(newEndString)
+    if newStartString is not "" then
+      set text item delimiters to {"-", " ", ":"}
+      set startParts to text items of newStartString
+      set text item delimiters to ""
+      set effectiveStart to current date
+      set day of effectiveStart to 1
+      set year of effectiveStart to (item 1 of startParts) as integer
+      set month of effectiveStart to (item 2 of startParts) as integer
+      set day of effectiveStart to (item 3 of startParts) as integer
+      set time of effectiveStart to (((item 4 of startParts) as integer) * hours) + (((item 5 of startParts) as integer) * minutes)
+      set seconds of effectiveStart to 0
+    end if
+    if newEndString is not "" then
+      set text item delimiters to {"-", " ", ":"}
+      set endParts to text items of newEndString
+      set text item delimiters to ""
+      set effectiveEnd to current date
+      set day of effectiveEnd to 1
+      set year of effectiveEnd to (item 1 of endParts) as integer
+      set month of effectiveEnd to (item 2 of endParts) as integer
+      set day of effectiveEnd to (item 3 of endParts) as integer
+      set time of effectiveEnd to (((item 4 of endParts) as integer) * hours) + (((item 5 of endParts) as integer) * minutes)
+      set seconds of effectiveEnd to 0
+    end if
     if newLocation is not "" then set effectiveLocation to newLocation
     if newNotes is not "" then set effectiveNotes to newNotes
     if newURL is not "" then set effectiveURL to newURL
 
     if newCalendarName is not "" then
-      if not (exists calendar newCalendarName) then error "Calendar not found: " & newCalendarName
-      set targetCalendar to calendar newCalendarName
+      set targetCalendars to every calendar whose name is newCalendarName
+      if (count of targetCalendars) is 0 then error "Calendar not found: " & newCalendarName
+      set targetCalendar to first item of targetCalendars
     end if
 
     if dryRunValue is "0" then
@@ -312,7 +333,6 @@ end run
 APPLESCRIPT
   )"
 
-  [[ -n "$old_record" ]] || calendar_die "event not found: $event_id"
   local combined_records="$old_record"
   old_record="$(python3 - "$combined_records" <<'PY'
 import sys

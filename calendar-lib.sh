@@ -273,6 +273,18 @@ print(end.strftime("%Y-%m-%d %H:%M"))
 PY
 }
 
+default_end_from_start() {
+  local start="$1"
+
+  "$(python3_bin)" - "$start" <<'PY'
+from datetime import datetime, timedelta
+import sys
+
+dt = datetime.strptime(sys.argv[1], "%Y-%m-%d %H:%M")
+print((dt + timedelta(days=7)).strftime("%Y-%m-%d %H:%M"))
+PY
+}
+
 normalize_alarm() {
   local input="${1:-}"
 
@@ -381,6 +393,16 @@ if records:
         items.append(item)
 
 print(json.dumps(items, ensure_ascii=False, indent=2))
+PY
+}
+
+count_records() {
+  local records="$1"
+
+  "$(python3_bin)" - "$records" <<'PY'
+import sys
+
+print(sum(1 for part in sys.argv[1].split("\036") if part.strip()))
 PY
 }
 

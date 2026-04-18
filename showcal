@@ -23,6 +23,16 @@ on pad2(n)
   return n as text
 end pad2
 
+on replaceText(inputValue, findValue, replaceValue)
+  set originalDelims to AppleScript's text item delimiters
+  set AppleScript's text item delimiters to findValue
+  set parts to every text item of (inputValue as text)
+  set AppleScript's text item delimiters to replaceValue
+  set normalizedValue to parts as text
+  set AppleScript's text item delimiters to originalDelims
+  return normalizedValue
+end replaceText
+
 on isoDate(theDate)
   set y to year of theDate as integer
   set m to my pad2(month of theDate as integer)
@@ -32,13 +42,13 @@ on isoDate(theDate)
   return (y as text) & "-" & m & "-" & d & " " & h & ":" & minValue
 end isoDate
 
-on safeText(inputValue)
-  set originalDelims to AppleScript's text item delimiters
-  set AppleScript's text item delimiters to return
-  set parts to every text item of (inputValue as text)
-  set AppleScript's text item delimiters to "\\n"
-  set normalizedValue to parts as text
-  set AppleScript's text item delimiters to originalDelims
+on safeText(inputValue, fieldDelim, recordDelim)
+  set normalizedValue to inputValue as text
+  set normalizedValue to my replaceText(normalizedValue, return, " ")
+  set normalizedValue to my replaceText(normalizedValue, linefeed, " ")
+  set normalizedValue to my replaceText(normalizedValue, tab, " ")
+  set normalizedValue to my replaceText(normalizedValue, fieldDelim, " ")
+  set normalizedValue to my replaceText(normalizedValue, recordDelim, " ")
   return normalizedValue
 end safeText
 
@@ -72,7 +82,7 @@ on run argv
         try
           set recurrenceValue to recurrence of evt
         end try
-        return (id of evt) & fieldDelim & (name of cal) & fieldDelim & my safeText(summary of evt) & fieldDelim & my isoDate(start date of evt) & fieldDelim & my isoDate(end date of evt) & fieldDelim & my safeText(eventLocation) & fieldDelim & my safeText(eventNotes) & fieldDelim & my safeText(eventURL) & fieldDelim & (alarmValue as text) & fieldDelim & my safeText(recurrenceValue) & recordDelim
+        return (id of evt) & fieldDelim & (name of cal) & fieldDelim & my safeText(summary of evt, fieldDelim, recordDelim) & fieldDelim & my isoDate(start date of evt) & fieldDelim & my isoDate(end date of evt) & fieldDelim & my safeText(eventLocation, fieldDelim, recordDelim) & fieldDelim & my safeText(eventNotes, fieldDelim, recordDelim) & fieldDelim & my safeText(eventURL, fieldDelim, recordDelim) & fieldDelim & (alarmValue as text) & fieldDelim & my safeText(recurrenceValue, fieldDelim, recordDelim) & recordDelim
       end if
     end repeat
   end tell

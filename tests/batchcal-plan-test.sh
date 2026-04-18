@@ -47,6 +47,11 @@ assert_contains "$output" 'source_key: gym-plan' "shows source_key"
 if printf '%s' '{"events":[{"title":"Bad","start":"next Tuesday","end":"2026-04-18 19:00"}]}' | "$repo_root/batchcal" --stdin --dry-run >/tmp/batchcal-invalid.out 2>&1; then
   fail "invalid datetime should fail"
 fi
-assert_contains "$(cat /tmp/batchcal-invalid.out)" "invalid start" "reports invalid start datetime"
+assert_contains "$(cat /tmp/batchcal-invalid.out)" "invalid datetime 'next Tuesday'" "reports invalid start datetime"
+
+if printf '%s' '{"events":[{"title":"Bad bucket","start":"2026-04-18 18:00","end":"2026-04-18 19:00","bucket":"weird"}]}' | "$repo_root/batchcal" --stdin --apply >/tmp/batchcal-apply.out 2>&1; then
+  fail "apply should stop on addcal failure"
+fi
+assert_contains "$(cat /tmp/batchcal-apply.out)" "unsupported bucket" "propagates addcal failure during apply"
 
 printf 'batchcal dry-run tests passed\n'

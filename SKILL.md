@@ -100,11 +100,12 @@ cat birthdays.json | batchcal --stdin --dry-run
 
 Route events in this order:
 
-1. Use `--calendar` when the exact calendar is known.
-2. Use `--bucket` to infer a likely destination calendar.
-3. Prefer the exact mapped calendars for that bucket when they exist: `个人`/`Personal`, `工作`/`Work`, or `生活`/`Life`.
-4. Use `listcal --list-calendars` if the choice is still unclear.
-5. Fall back to the default calendar only when nothing else fits.
+1. **Before creating anything**, use `listcal --format tsv` to check existing events in the target time range. This avoids overlaps and conflicts.
+2. Use `--calendar` when the exact calendar is known.
+3. Use `--bucket` to infer a likely destination calendar.
+4. Prefer the exact mapped calendars for that bucket when they exist: `个人`/`Personal`, `工作`/`Work`, or `生活`/`Life`.
+5. Use `listcal --list-calendars` if the choice is still unclear.
+6. Fall back to the default calendar only when nothing else fits.
 
 Then:
 
@@ -119,9 +120,13 @@ Then:
 - Datetime format is `YYYY-MM-DD HH:MM`.
 - These commands are macOS-only because they depend on Calendar.app.
 - This skill is for real Apple Calendar / iCloud data, not local `.ics` files.
+- Alarm support is still centered on `display alarm`; audio, email, and open-file alarms are not fully preserved across inspect/edit flows.
 
 ## Pitfalls
 
+- **Agent 操作日历前应先 `listcal` 检查现有事件**：避免创建重叠或冲突的日程。用户明确反馈过这个问题。
 - **Batch input is JSON-first**: `batchcal` does not parse natural language directly. The agent should turn user requests into JSON first, then run `batchcal`.
 - **Install location**: This skill lives at `~/skills/apple-calendar-cli/`, not `~/.hermes/skills/`. Use full path `/Users/mac/skills/apple-calendar-cli/addcal` if the skill is not installed in the Hermes skills directory.
 - **Always check `--help` first**: The CLI syntax may differ from intuition (e.g. short form `addcal "start" "end" "title"` vs long form with `--start`, `--end`, `--title`, `--calendar`).
+- **No `--alarm` in older versions**: If you see `unknown option: --alarm`, the `addcal` script needs updating. Alarm support was added in a later revision.
+- **Location auto-fill is not built-in yet**: `--auto-location` (calling map APIs) is a planned Phase 3 feature, not yet implemented.
