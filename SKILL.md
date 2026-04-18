@@ -1,6 +1,6 @@
 ---
 name: apple-calendar-cli
-description: Manage Apple Calendar and iCloud calendars on macOS with non-interactive local CLIs: `addcal`, `listcal`, `delcal`, `editcal`, `showcal`, and `batchcal`. Use when an agent needs to create, inspect, update, delete, or batch-import real Calendar.app events that should sync to iCloud.
+description: Manage Apple Calendar and iCloud calendars on macOS with non-interactive local CLIs: `addcal`, `listcal`, `delcal`, `editcal`, `showcal`, `batchcal`, and `img2cal`. Use when an agent needs to create, inspect, update, delete, batch-import, or ticket-normalize real Calendar.app events that should sync to iCloud.
 metadata: {"clawdbot":{"emoji":"🗓️","os":["macos"],"requires":{"bins":["addcal","listcal","delcal"]}}}
 ---
 
@@ -96,6 +96,31 @@ batchcal --plan semester.json --apply
 cat birthdays.json | batchcal --stdin --dry-run
 ```
 
+### Normalize ticket data into calendar event
+
+`img2cal` does **not** perform image recognition. The agent/LLM must extract structured ticket fields first, then pass them to `img2cal` for normalization and calendar creation.
+
+```bash
+# Preview the normalized draft
+img2cal --type movie --title "奥本海默" --start "2026-05-01 19:30" --location "万达影城" --seat "8排12座" --draft
+
+# Create the event directly
+img2cal --type train --title "G1234" --start "2026-06-15 08:00" --end "2026-06-15 12:30" --location "上海虹桥站" --carriage "05车" --gate "12A" --apply
+
+# Pass extra fields via stdin JSON
+echo '{"seat": "12A", "boarding_gate": "58", "terminal": "T2"}' | img2cal --type flight --title "CA9876" --start "2026-07-20 14:00" --end "2026-07-20 16:30" --location "上海浦东" --stdin --draft
+```
+
+Supported `--type` values: `movie`, `train`, `bus`, `flight`, `concert`.
+
+`img2cal` automatically:
+- Adds a title prefix (`看电影：`, `高铁：`, `航班：`, `演唱会：`)
+- Computes default `end` times (`movie` +150 min, `concert` +180 min)
+- Formats extra fields (seat, gate, terminal, etc.) into `notes`
+- Resolves `location` via `personal-context.json` `common_venues`
+- Chooses `bucket`/`calendar` via `personal-context.json` preferences
+- Checks for conflicts before `--apply` (when explicit calendar is known)
+
 ## Agent workflow
 
 Route events in this order:
@@ -114,6 +139,8 @@ Then:
 3. Use `editcal --id ...` for safe updates.
 4. Use `delcal --id ...` for safe deletion.
 5. Use `batchcal --dry-run` before any large import.
+6. Use `img2cal --draft` to normalize and preview ticket data before creating events.
+7. Use `img2cal --apply` after the user confirms the ticket draft.
 
 ## Notes
 
@@ -121,6 +148,29 @@ Then:
 - These commands are macOS-only because they depend on Calendar.app.
 - This skill is for real Apple Calendar / iCloud data, not local `.ics` files.
 - Alarm support is still centered on `display alarm`; audio, email, and open-file alarms are not fully preserved across inspect/edit flows.
+
+## Ticket / Receipt Image Workflow
+
+When the user sends a ticket image (movie, train, flight, bus, concert) or describes a ticket in natural language, follow this flow instead of immediately calling `addcal`:
+
+1. **Extract structured fields** from the image or description:
+   - `title`, `start`, `end`, `location`, `notes`
+   - Infer missing `end` times using sensible defaults only when the intent is unambiguous (e.g. movie +150 min, concert +180 min).
+   - If start time or title cannot be determined, stop and ask the user for clarification.
+
+2. **Present a draft to the user** for confirmation:
+   - Show the parsed fields in a concise summary.
+   - Ask: "是否将此事件添加到日历？" or "Add this event to your calendar?"
+   - If the user confirms, proceed to step 3. If they decline or request changes, stop.
+
+3. **Before creating**, run `listcal` in the target time window to surface conflicts:
+   - `listcal --calendar "<resolved-calendar>" --start "<start>" --end "<end>" --format tsv`
+   - If conflicts exist, warn the user and ask whether to proceed.
+
+4. **Create the event** via `addcal`:
+   - Use `--calendar` if the exact calendar is known.
+   - Otherwise use `--bucket` (`personal`, `work`, `life`) and let `addcal` resolve it.
+   - Pass `--location`, `--notes`, `--alarm` as appropriate.
 
 ## Pitfalls
 

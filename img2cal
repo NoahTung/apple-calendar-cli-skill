@@ -1,0 +1,320 @@
+#!/usr/bin/env python3
+"""Lightweight ticket-to-calendar normalization tool.
+
+img2cal receives structured ticket data (already parsed by an LLM/agent)
+and normalizes it into a calendar event draft, then optionally creates it
+via addcal.
+
+No image recognition is done here — that is the agent/LLM's responsibility.
+"""
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from datetime import datetime, timedelta
+
+REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+ADDCAL = os.path.join(REPO_ROOT, "addcal")
+LISTCAL = os.path.join(REPO_ROOT, "listcal")
+DEFAULT_CONTEXT_PATH = os.path.join(REPO_ROOT, "personal-context.json")
+CONTEXT_PATH = DEFAULT_CONTEXT_PATH
+
+# ── Defaults ────────────────────────────────────────────────────────
+
+TITLE_PREFIX = {
+    "movie": "看电影：",
+    "train": "高铁：",
+    "bus": "汽车：",
+    "flight": "航班：",
+    "concert": "演唱会：",
+}
+
+DEFAULT_END_OFFSET_MIN = {
+    "movie": 150,
+    "concert": 180,
+}
+
+DEFAULT_BUCKET = {
+    "movie": "life",
+    "train": "life",
+    "bus": "life",
+    "flight": "life",
+    "concert": "life",
+}
+
+NOTES_FIELD_MAP = {
+    "seat": "座位",
+    "hall": "影厅",
+    "gate": "检票口",
+    "terminal": "航站楼",
+    "check_in": "值机柜台",
+    "carriage": "车厢",
+    "ticket_no": "票号",
+    "order_id": "订单号",
+    "zone": "区域",
+    "row": "排号",
+    "price": "票档",
+    "boarding_gate": "登机口",
+    "train_no": "车次",
+    "bus_no": "班次",
+}
+
+STANDARD_FIELDS = {
+    "type", "title", "start", "end", "location",
+    "calendar", "bucket", "url", "notes",
+}
+
+# ── Context helpers ─────────────────────────────────────────────────
+
+def load_context(path=None):
+    p = path or CONTEXT_PATH
+    if not os.path.exists(p):
+        return {}
+    try:
+        with open(p, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return {}
+
+
+def resolve_location(raw, context):
+    if not raw:
+        return ""
+    venues = context.get("common_venues", {})
+    if raw in venues:
+        return venues[raw]
+    for alias, resolved in venues.items():
+        if alias in raw or raw in alias:
+            return resolved
+    return raw
+
+
+def resolve_calendar_bucket(ticket_type, explicit_calendar, explicit_bucket, context):
+    prefs = context.get("calendar_preferences", {}).get(ticket_type, {})
+    calendar = explicit_calendar or prefs.get("calendar", "")
+    bucket = explicit_bucket or prefs.get("bucket", "") or DEFAULT_BUCKET.get(ticket_type, "life")
+    return calendar, bucket
+
+
+# ── Normalization ───────────────────────────────────────────────────
+
+def normalize_ticket(raw):
+    ticket_type = raw.get("type", "unknown")
+    title = raw.get("title", "")
+    start = raw.get("start", "")
+    end = raw.get("end", "")
+    location = raw.get("location", "")
+    explicit_calendar = raw.get("calendar", "")
+    explicit_bucket = raw.get("bucket", "")
+    url = raw.get("url", "")
+    notes = raw.get("notes", "")
+
+    context = load_context()
+
+    # Title prefix
+    if ticket_type in TITLE_PREFIX and title:
+        title = TITLE_PREFIX[ticket_type] + title
+
+    # Default end time
+    missing_fields = []
+    if start and not end:
+        offset = DEFAULT_END_OFFSET_MIN.get(ticket_type)
+        if offset:
+            try:
+                dt = datetime.strptime(start, "%Y-%m-%d %H:%M")
+                end = (dt + timedelta(minutes=offset)).strftime("%Y-%m-%d %H:%M")
+            except ValueError:
+                missing_fields.append("end")
+        elif ticket_type in ("train", "bus", "flight"):
+            missing_fields.append("end")
+
+    if not start:
+        missing_fields.append("start")
+    if not title:
+        missing_fields.append("title")
+
+    # Location resolution
+    location = resolve_location(location, context)
+
+    # Calendar / bucket
+    calendar, bucket = resolve_calendar_bucket(ticket_type, explicit_calendar, explicit_bucket, context)
+
+    # Notes assembly from extra fields
+    extra_notes_parts = []
+    for key, label in NOTES_FIELD_MAP.items():
+        if key in raw and raw[key]:
+            extra_notes_parts.append(f"{label}：{raw[key]}")
+    if extra_notes_parts:
+        if notes:
+            notes += "\n"
+        notes += "\n".join(extra_notes_parts)
+
+    return {
+        "ticket_type": ticket_type,
+        "title": title,
+        "start": start,
+        "end": end,
+        "location": location,
+        "notes": notes,
+        "url": url,
+        "calendar": calendar,
+        "bucket": bucket,
+        "missing_fields": missing_fields,
+    }
+
+
+# ── Conflict check ──────────────────────────────────────────────────
+
+def check_conflicts(calendar, start, end):
+    if not calendar:
+        return ""
+    cmd = [LISTCAL, "--calendar", calendar, "--start", start, "--end", end, "--format", "tsv"]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode == 0:
+            lines = [ln for ln in result.stdout.strip().splitlines() if ln.strip()]
+            if len(lines) > 1:  # header + at least one event
+                return result.stdout
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    return ""
+
+
+# ── Apply ───────────────────────────────────────────────────────────
+
+def apply_event(draft):
+    cmd = [ADDCAL, "--start", draft["start"], "--end", draft["end"], "--title", draft["title"]]
+    if draft["calendar"]:
+        cmd += ["--calendar", draft["calendar"]]
+    if draft["bucket"] and not draft["calendar"]:
+        cmd += ["--bucket", draft["bucket"]]
+    if draft["location"]:
+        cmd += ["--location", draft["location"]]
+    if draft["notes"]:
+        cmd += ["--notes", draft["notes"]]
+    if draft["url"]:
+        cmd += ["--url", draft["url"]]
+
+    subprocess.run(cmd, check=True)
+
+
+# ── CLI ─────────────────────────────────────────────────────────────
+
+def die(msg):
+    print(f"img2cal: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Normalize ticket data into calendar events")
+    parser.add_argument("--type", required=True, choices=["movie", "train", "bus", "flight", "concert"])
+    parser.add_argument("--title", required=True)
+    parser.add_argument("--start", required=True)
+    parser.add_argument("--end", default="")
+    parser.add_argument("--location", default="")
+    parser.add_argument("--url", default="")
+    parser.add_argument("--calendar", default="")
+    parser.add_argument("--bucket", default="")
+    parser.add_argument("--notes", default="")
+    parser.add_argument("--seat", default="")
+    parser.add_argument("--hall", default="")
+    parser.add_argument("--gate", default="")
+    parser.add_argument("--terminal", default="")
+    parser.add_argument("--check-in", default="")
+    parser.add_argument("--carriage", default="")
+    parser.add_argument("--ticket-no", default="")
+    parser.add_argument("--order-id", default="")
+    parser.add_argument("--zone", default="")
+    parser.add_argument("--row", default="")
+    parser.add_argument("--price", default="")
+    parser.add_argument("--boarding-gate", default="")
+    parser.add_argument("--train-no", default="")
+    parser.add_argument("--bus-no", default="")
+    parser.add_argument("--context", default="", help="Path to personal-context.json")
+    parser.add_argument("--stdin", action="store_true", help="Read extra fields from stdin JSON")
+    parser.add_argument("--draft", action="store_true", help="Output normalized draft JSON")
+    parser.add_argument("--apply", action="store_true", help="Create the event via addcal")
+    args = parser.parse_args()
+
+    if not args.draft and not args.apply:
+        die("choose --draft or --apply")
+
+    global CONTEXT_PATH
+    if args.context:
+        CONTEXT_PATH = args.context
+
+    raw = {
+        "type": args.type,
+        "title": args.title,
+        "start": args.start,
+        "end": args.end,
+        "location": args.location,
+        "url": args.url,
+        "calendar": args.calendar,
+        "bucket": args.bucket,
+        "notes": args.notes,
+        "seat": args.seat,
+        "hall": args.hall,
+        "gate": args.gate,
+        "terminal": args.terminal,
+        "check_in": args.check_in,
+        "carriage": args.carriage,
+        "ticket_no": args.ticket_no,
+        "order_id": args.order_id,
+        "zone": args.zone,
+        "row": args.row,
+        "price": args.price,
+        "boarding_gate": args.boarding_gate,
+        "train_no": args.train_no,
+        "bus_no": args.bus_no,
+    }
+
+    if args.stdin:
+        stdin_data = json.load(sys.stdin)
+        if isinstance(stdin_data, dict):
+            raw.update(stdin_data)
+        else:
+            die("stdin must be a JSON object")
+
+    draft = normalize_ticket(raw)
+
+    if args.draft:
+        print(json.dumps(draft, ensure_ascii=False, indent=2))
+        return
+
+    # --apply
+    if draft["missing_fields"]:
+        die(f"missing required fields: {', '.join(draft['missing_fields'])}")
+
+    target_calendar = draft["calendar"]
+    if not target_calendar and draft["bucket"]:
+        # Resolve bucket to actual calendar name using addcal routing
+        try:
+            result = subprocess.run(
+                [ADDCAL, "--bucket", draft["bucket"], "--start", draft["start"],
+                 "--end", draft["end"], "--title", draft["title"], "--dry-run"],
+                capture_output=True, text=True, timeout=30
+            )
+            # If addcal would route to a calendar, we trust the routing
+            # But we don't know the exact name. Better to pass --bucket to addcal.
+            pass
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+
+    # Conflict check (only when explicit calendar is known)
+    if draft["start"] and draft["end"] and draft["calendar"]:
+        conflicts = check_conflicts(draft["calendar"], draft["start"], draft["end"])
+        if conflicts:
+            lines = [ln for ln in conflicts.strip().splitlines() if ln.strip()]
+            count = max(0, len(lines) - 1)
+            print(f"Warning: {count} overlapping event(s) in {draft['calendar']}", file=sys.stderr)
+            print(conflicts, file=sys.stderr)
+
+    apply_event(draft)
+    print(f"Created {draft['ticket_type']} event: {draft['title']} ({draft['start']} -> {draft['end']})")
+
+
+if __name__ == "__main__":
+    main()

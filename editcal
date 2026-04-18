@@ -322,7 +322,7 @@ on run argv
       else if (count of display alarms of foundEvent) > 0 then
         set alarmValue to trigger interval of first display alarm of foundEvent
       end if
-      set newRecordText to targetEventId & fieldDelim & (name of foundCalendar) & fieldDelim & my safeText(shadowEventTitle) & fieldDelim & my isoDate(shadowStart) & fieldDelim & my isoDate(shadowEnd) & fieldDelim & my safeText(shadowLocation) & fieldDelim & my safeText(shadowNotes) & fieldDelim & my safeText(shadowURL) & fieldDelim & (alarmValue as text) & fieldDelim & my safeText(effectiveRecurrence) & recordDelim
+      set newRecordText to targetEventId & fieldDelim & (name of foundCalendar) & fieldDelim & my safeText(shadowEventTitle, fieldDelim, recordDelim) & fieldDelim & my isoDate(shadowStart) & fieldDelim & my isoDate(shadowEnd) & fieldDelim & my safeText(shadowLocation, fieldDelim, recordDelim) & fieldDelim & my safeText(shadowNotes, fieldDelim, recordDelim) & fieldDelim & my safeText(shadowURL, fieldDelim, recordDelim) & fieldDelim & (alarmValue as text) & fieldDelim & my safeText(effectiveRecurrence, fieldDelim, recordDelim) & recordDelim
     else
       set newRecordText to my eventRecord(foundEvent, name of foundCalendar, fieldDelim, recordDelim)
     end if

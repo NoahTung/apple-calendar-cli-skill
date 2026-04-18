@@ -1,0 +1,12 @@
+{
+  "current_city": "",
+  "home_city": "",
+  "common_venues": {},
+  "calendar_preferences": {
+    "movie": { "bucket": "life", "calendar": "" },
+    "concert": { "bucket": "life", "calendar": "" },
+    "train": { "bucket": "life", "calendar": "" },
+    "bus": { "bucket": "life", "calendar": "" },
+    "flight": { "bucket": "life", "calendar": "" }
+  }
+}
