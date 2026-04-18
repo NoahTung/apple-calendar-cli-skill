@@ -1,6 +1,6 @@
 # Apple Calendar CLI Skill
 
-Agent-first Apple Calendar and iCloud automation for macOS.
+Tiny agent-first CLIs for the real Apple Calendar on macOS.
 
 Use Apple Calendar and iCloud calendars on macOS through a small set of non-interactive local CLIs:
 
@@ -8,19 +8,32 @@ Use Apple Calendar and iCloud calendars on macOS through a small set of non-inte
 - `listcal`
 - `delcal`
 
-This setup is designed for agents such as Codex, Claude Code, Hermes, or any tool that can run shell commands locally.
+Built for Codex, Claude Code, Hermes, and any local agent that can run shell commands.
 
-## Why This Project Exists
+## Why This Exists
 
-Most calendar automation on GitHub falls into one of these buckets:
+Most calendar automation tools optimize for a different target:
 
-- CalDAV-first tools like `khal` and `vdirsyncer`
-- generic AppleScript snippets
-- large MCP or automation servers that do far more than calendar operations
+- CalDAV portability
+- ad-hoc AppleScript snippets
+- large automation or MCP servers
 
-This project targets a narrower and more practical use case:
+This repo optimizes for one very specific workflow instead:
 
-> Give coding agents a tiny, reliable command-line interface for the user's real Apple Calendar on macOS.
+> Let an agent create, list, and delete events in the user's actual Apple Calendar on macOS, then let iCloud sync the result.
+
+In practice, that means the shortest useful path is:
+
+`agent -> addcal/listcal/delcal -> Calendar.app -> iCloud`
+
+## Why This Repo Instead
+
+| Option | Good for | Tradeoff | This repo's angle |
+| --- | --- | --- | --- |
+| `khal` + `vdirsyncer` | CalDAV-first and cross-platform workflows | extra sync layer, more config, not aimed at Calendar.app directly | skip the CalDAV stack when the target is already Apple Calendar on a Mac |
+| Random AppleScript snippets | quick one-off experiments | no stable CLI contract, harder for agents to reuse safely | package the behavior as named, repeatable commands |
+| Large MCP / automation servers | broad assistant integrations | much larger surface area than simple calendar CRUD | keep the interface tiny, local, and auditable |
+| **This repo** | **agent-driven Apple Calendar automation on macOS** | **macOS-only by design** | **small non-interactive CLIs for real Calendar.app data** |
 
 That means:
 
@@ -28,10 +41,6 @@ That means:
 - no extra CalDAV sync layer
 - no local `.ics`-only detour
 - no giant automation framework required
-
-Just:
-
-`agent -> addcal/listcal/delcal -> Calendar.app -> iCloud`
 
 ## Key Advantages
 
