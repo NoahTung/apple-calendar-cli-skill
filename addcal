@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
-
 DEFAULT_CALENDAR="个人"
 
 usage() {
@@ -9,18 +7,51 @@ usage() {
 Usage:
   addcal [calendar] <start> <end> <title>
   addcal --start "<YYYY-MM-DD HH:MM>" --end "<YYYY-MM-DD HH:MM>" --title "<title>" [--calendar "<name>"]
+  addcal --start "<YYYY-MM-DD HH:MM>" --end "<YYYY-MM-DD HH:MM>" --title "<title>" [--bucket personal|work|life]
   addcal --list-calendars
 
 Examples:
   addcal "2026-04-18 19:00" "2026-04-18 20:00" "吃饭"
   addcal "工作" "2026-04-18 17:00" "2026-04-18 18:00" "专注工作"
   addcal --calendar "个人" --start "2026-04-18 19:00" --end "2026-04-18 20:00" --title "吃饭"
+  addcal --bucket work --start "2026-04-18 17:00" --end "2026-04-18 18:00" --title "Deep work"
+
+Bucket routing:
+  personal -> 个人 or Personal
+  work -> 工作 or Work
+  life -> 生活 or Life
+  Explicit --calendar always wins over --bucket.
 EOF
 }
 
 die() {
   printf 'addcal: %s\n' "$1" >&2
   exit 1
+}
+
+trim_whitespace() {
+  local value="${1:-}"
+
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+
+  printf '%s' "$value"
+}
+
+normalize_bucket() {
+  local bucket
+
+  bucket="$(trim_whitespace "${1:-}")"
+  bucket="$(printf '%s' "$bucket" | tr '[:upper:]' '[:lower:]')"
+
+  case "$bucket" in
+    personal|work|life)
+      printf '%s\n' "$bucket"
+      ;;
+    *)
+      die "unsupported bucket '$1' (use personal, work, or life)"
+      ;;
+  esac
 }
 
 validate_datetime() {
@@ -47,137 +78,233 @@ parse_datetime() {
 }
 
 list_calendars() {
-  osascript -e 'tell application "Calendar" to get name of calendars'
+  osascript \
+    -e 'tell application "Calendar"' \
+    -e 'set outputText to ""' \
+    -e 'repeat with c in calendars' \
+    -e 'set outputText to outputText & (name of c) & linefeed' \
+    -e 'end repeat' \
+    -e 'return outputText' \
+    -e 'end tell'
 }
 
-calendar="$DEFAULT_CALENDAR"
-start=""
-end=""
-title=""
-list_only=0
+resolve_bucket_calendar() {
+  local normalized_bucket="$1"
+  local calendars_text="${2:-}"
+  local candidate
+  local calendar_name
 
-if [[ $# -eq 0 ]]; then
-  usage
-  exit 1
-fi
-
-if [[ "$1" == "--help" || "$1" == "-h" ]]; then
-  usage
-  exit 0
-fi
-
-if [[ "$1" == --* ]]; then
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --calendar)
-        [[ $# -ge 2 ]] || die "missing value for --calendar"
-        calendar="$2"
-        shift 2
-        ;;
-      --start)
-        [[ $# -ge 2 ]] || die "missing value for --start"
-        start="$2"
-        shift 2
-        ;;
-      --end)
-        [[ $# -ge 2 ]] || die "missing value for --end"
-        end="$2"
-        shift 2
-        ;;
-      --title)
-        [[ $# -ge 2 ]] || die "missing value for --title"
-        title="$2"
-        shift 2
-        ;;
-      --list-calendars)
-        list_only=1
-        shift
-        ;;
-      --help|-h)
-        usage
-        exit 0
-        ;;
-      *)
-        die "unknown option: $1"
-        ;;
-    esac
-  done
-else
-  case $# in
-    3)
-      start="$1"
-      end="$2"
-      title="$3"
+  case "$normalized_bucket" in
+    personal)
+      set -- "个人" "Personal"
       ;;
-    4)
-      calendar="$1"
-      start="$2"
-      end="$3"
-      title="$4"
+    work)
+      set -- "工作" "Work"
+      ;;
+    life)
+      set -- "生活" "Life"
       ;;
     *)
-      usage
-      exit 1
+      die "unsupported bucket '$normalized_bucket' (use personal, work, or life)"
       ;;
   esac
+
+  while IFS= read -r candidate; do
+    candidate="$(trim_whitespace "$candidate")"
+    [[ -n "$candidate" ]] || continue
+
+    for calendar_name in "$@"; do
+      if [[ "$candidate" == "$calendar_name" ]]; then
+        printf '%s\n' "$candidate"
+        return 0
+      fi
+    done
+  done <<< "$calendars_text"
+
+  printf '%s\n' "$DEFAULT_CALENDAR"
+}
+
+select_calendar() {
+  local calendar="$1"
+  local bucket="${2:-}"
+  local explicit_calendar="${3:-0}"
+  local normalized_bucket
+  local calendars_text
+
+  if [[ "$explicit_calendar" -eq 1 ]]; then
+    printf '%s\n' "$calendar"
+    return 0
+  fi
+
+  if [[ -n "$bucket" ]]; then
+    normalized_bucket="$(normalize_bucket "$bucket")"
+    calendars_text="$(list_calendars)"
+    printf '%s\n' "$(resolve_bucket_calendar "$normalized_bucket" "$calendars_text")"
+    return 0
+  fi
+
+  printf '%s\n' "$calendar"
+}
+
+main() {
+  local calendar="$DEFAULT_CALENDAR"
+  local start=""
+  local end=""
+  local title=""
+  local bucket=""
+  local list_only=0
+  local explicit_calendar=0
+  local normalized_bucket=""
+  local routing_note=""
+  local event_id
+
+  if [[ $# -eq 0 ]]; then
+    usage
+    exit 1
+  fi
+
+  if [[ "$1" == "--help" || "$1" == "-h" ]]; then
+    usage
+    exit 0
+  fi
+
+  if [[ "$1" == --* ]]; then
+    while [[ $# -gt 0 ]]; do
+      case "$1" in
+        --calendar)
+          [[ $# -ge 2 ]] || die "missing value for --calendar"
+          calendar="$2"
+          explicit_calendar=1
+          shift 2
+          ;;
+        --bucket)
+          [[ $# -ge 2 ]] || die "missing value for --bucket"
+          bucket="$2"
+          shift 2
+          ;;
+        --start)
+          [[ $# -ge 2 ]] || die "missing value for --start"
+          start="$2"
+          shift 2
+          ;;
+        --end)
+          [[ $# -ge 2 ]] || die "missing value for --end"
+          end="$2"
+          shift 2
+          ;;
+        --title)
+          [[ $# -ge 2 ]] || die "missing value for --title"
+          title="$2"
+          shift 2
+          ;;
+        --list-calendars)
+          list_only=1
+          shift
+          ;;
+        --help|-h)
+          usage
+          exit 0
+          ;;
+        *)
+          die "unknown option: $1"
+          ;;
+      esac
+    done
+  else
+    case $# in
+      3)
+        start="$1"
+        end="$2"
+        title="$3"
+        ;;
+      4)
+        calendar="$1"
+        explicit_calendar=1
+        start="$2"
+        end="$3"
+        title="$4"
+        ;;
+      *)
+        usage
+        exit 1
+        ;;
+    esac
+  fi
+
+  if [[ $list_only -eq 1 ]]; then
+    list_calendars
+    exit 0
+  fi
+
+  if [[ -n "$bucket" ]]; then
+    if [[ "$explicit_calendar" -eq 0 ]]; then
+      normalized_bucket="$(normalize_bucket "$bucket")"
+    fi
+  fi
+
+  calendar="$(select_calendar "$calendar" "$bucket" "$explicit_calendar")"
+
+  if [[ -n "$bucket" && $explicit_calendar -eq 0 ]]; then
+    routing_note=" (bucket ${normalized_bucket} -> ${calendar})"
+  fi
+
+  [[ -n "$start" ]] || die "missing start time"
+  [[ -n "$end" ]] || die "missing end time"
+  [[ -n "$title" ]] || die "missing title"
+
+  parse_datetime "$start" start
+  parse_datetime "$end" end
+
+  if [[ "$end_epoch" -le "$start_epoch" ]]; then
+    die "end time must be after start time"
+  fi
+
+  event_id="$(
+    osascript \
+      -e 'on run argv' \
+      -e 'set calendarName to item 1 of argv' \
+      -e 'set eventTitle to item 2 of argv' \
+      -e 'set startYear to (item 3 of argv) as integer' \
+      -e 'set startMonth to (item 4 of argv) as integer' \
+      -e 'set startDay to (item 5 of argv) as integer' \
+      -e 'set startHour to (item 6 of argv) as integer' \
+      -e 'set startMinute to (item 7 of argv) as integer' \
+      -e 'set endYear to (item 8 of argv) as integer' \
+      -e 'set endMonth to (item 9 of argv) as integer' \
+      -e 'set endDay to (item 10 of argv) as integer' \
+      -e 'set endHour to (item 11 of argv) as integer' \
+      -e 'set endMinute to (item 12 of argv) as integer' \
+      -e 'tell application "Calendar"' \
+      -e 'if not (exists calendar calendarName) then error "Calendar not found: " & calendarName' \
+      -e 'set startDate to current date' \
+      -e 'set year of startDate to startYear' \
+      -e 'set month of startDate to startMonth' \
+      -e 'set day of startDate to startDay' \
+      -e 'set time of startDate to (startHour * hours) + (startMinute * minutes)' \
+      -e 'set endDate to current date' \
+      -e 'set year of endDate to endYear' \
+      -e 'set month of endDate to endMonth' \
+      -e 'set day of endDate to endDay' \
+      -e 'set time of endDate to (endHour * hours) + (endMinute * minutes)' \
+      -e 'tell calendar calendarName' \
+      -e 'set newEvent to make new event with properties {summary:eventTitle, start date:startDate, end date:endDate}' \
+      -e 'set newEventId to id of newEvent' \
+      -e 'end tell' \
+      -e 'end tell' \
+      -e 'return newEventId' \
+      -e 'end run' \
+      -- \
+      "$calendar" \
+      "$title" \
+      "$start_year" "$start_month" "$start_day" "$start_hour" "$start_minute" \
+      "$end_year" "$end_month" "$end_day" "$end_hour" "$end_minute"
+  )"
+
+  printf 'Created event in %s%s: %s (%s -> %s) [id=%s]\n' \
+    "$calendar" "$routing_note" "$title" "$start" "$end" "$event_id"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  set -euo pipefail
+  main "$@"
 fi
-
-if [[ $list_only -eq 1 ]]; then
-  list_calendars
-  exit 0
-fi
-
-[[ -n "$start" ]] || die "missing start time"
-[[ -n "$end" ]] || die "missing end time"
-[[ -n "$title" ]] || die "missing title"
-
-parse_datetime "$start" start
-parse_datetime "$end" end
-
-if [[ "$end_epoch" -le "$start_epoch" ]]; then
-  die "end time must be after start time"
-fi
-
-event_id="$(
-  osascript \
-    -e 'on run argv' \
-    -e 'set calendarName to item 1 of argv' \
-    -e 'set eventTitle to item 2 of argv' \
-    -e 'set startYear to (item 3 of argv) as integer' \
-    -e 'set startMonth to (item 4 of argv) as integer' \
-    -e 'set startDay to (item 5 of argv) as integer' \
-    -e 'set startHour to (item 6 of argv) as integer' \
-    -e 'set startMinute to (item 7 of argv) as integer' \
-    -e 'set endYear to (item 8 of argv) as integer' \
-    -e 'set endMonth to (item 9 of argv) as integer' \
-    -e 'set endDay to (item 10 of argv) as integer' \
-    -e 'set endHour to (item 11 of argv) as integer' \
-    -e 'set endMinute to (item 12 of argv) as integer' \
-    -e 'tell application "Calendar"' \
-    -e 'if not (exists calendar calendarName) then error "Calendar not found: " & calendarName' \
-    -e 'set startDate to current date' \
-    -e 'set year of startDate to startYear' \
-    -e 'set month of startDate to startMonth' \
-    -e 'set day of startDate to startDay' \
-    -e 'set time of startDate to (startHour * hours) + (startMinute * minutes)' \
-    -e 'set endDate to current date' \
-    -e 'set year of endDate to endYear' \
-    -e 'set month of endDate to endMonth' \
-    -e 'set day of endDate to endDay' \
-    -e 'set time of endDate to (endHour * hours) + (endMinute * minutes)' \
-    -e 'tell calendar calendarName' \
-    -e 'set newEvent to make new event with properties {summary:eventTitle, start date:startDate, end date:endDate}' \
-    -e 'set newEventId to id of newEvent' \
-    -e 'end tell' \
-    -e 'end tell' \
-    -e 'return newEventId' \
-    -e 'end run' \
-    -- \
-    "$calendar" \
-    "$title" \
-    "$start_year" "$start_month" "$start_day" "$start_hour" "$start_minute" \
-    "$end_year" "$end_month" "$end_day" "$end_hour" "$end_minute"
-)"
-
-printf 'Created event in %s: %s (%s -> %s) [id=%s]\n' \
-  "$calendar" "$title" "$start" "$end" "$event_id"

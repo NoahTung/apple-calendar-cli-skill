@@ -87,6 +87,10 @@ This is a better fit than `khal` when the target is the real Apple Calendar data
 - Apple Calendar / iCloud calendar already configured in the system
 - permission for the calling terminal/app to control Calendar via AppleScript if macOS prompts for it
 
+### First-run permissions
+
+The first run may trigger a macOS Calendar automation prompt. If that happens, approve it once so these CLIs can reach Calendar.app cleanly.
+
 ## Files
 
 - [SKILL.md](/Users/mac/skills/apple-calendar-cli/SKILL.md): agent-facing instructions
@@ -137,7 +141,10 @@ Structured form:
 
 ```bash
 addcal --calendar "Personal" --start "2026-04-18 19:00" --end "2026-04-18 20:00" --title "Dinner"
+addcal --bucket work --start "2026-04-18 09:00" --end "2026-04-18 09:30" --title "Team standup"
 ```
+
+Routing is intentionally simple: `--calendar` wins when the exact destination is known, and `--bucket` (`personal`, `work`, or `life`) is only a hint for picking a likely calendar. It first prefers mapped calendars such as `个人`/`Personal`, `工作`/`Work`, or `生活`/`Life`, then falls back to the default calendar if no match exists. This CLI does not try to understand full natural-language requests.
 
 ### List events
 
@@ -182,10 +189,12 @@ delcal --calendar "Personal" --title "Dinner" --start "2026-04-18 19:00" --end "
 
 ## Recommended Agent Workflow
 
-1. Run `listcal --list-calendars` if the target calendar is unknown.
-2. Use `addcal` to create events.
-3. Use `listcal --format tsv` to inspect events and capture event ids.
-4. Use `delcal --id ...` for reliable deletion.
+1. Use `--calendar` when the exact destination calendar is known.
+2. Use `--bucket` to hint at a likely destination when the exact calendar is not known.
+3. Run `listcal --list-calendars` if the choice is still unclear.
+4. Use `addcal` to create events.
+5. Use `listcal --format tsv` to inspect events and capture event ids.
+6. Use `delcal --id ...` for reliable deletion.
 
 For automation, prefer deletion by event id rather than by title only.
 
