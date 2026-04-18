@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+DEFAULT_CALENDAR="个人"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  delcal --id "<event-id>" [--calendar "<name>"]
+  delcal --title "<title>" --start "<YYYY-MM-DD HH:MM>" --end "<YYYY-MM-DD HH:MM>" [--calendar "<name>"]
+  delcal --title "<title>" --start "<YYYY-MM-DD HH:MM>" --end "<YYYY-MM-DD HH:MM>" [--calendar "<name>"] --dry-run
+
+Examples:
+  delcal --id "0243912F-0D42-4477-A193-A881F73E7434"
+  delcal --calendar "个人" --title "吃饭" --start "2026-04-18 19:00" --end "2026-04-18 20:00"
+EOF
+}
+
+die() {
+  printf 'delcal: %s\n' "$1" >&2
+  exit 1
+}
+
+validate_datetime() {
+  local input="$1"
+  date -j -f "%Y-%m-%d %H:%M" "$input" "+%s" >/dev/null 2>&1 || \
+    die "invalid datetime '$input' (expected YYYY-MM-DD HH:MM)"
+}
+
+calendar="$DEFAULT_CALENDAR"
+event_id=""
+title=""
+start=""
+end=""
+dry_run=0
+
+if [[ $# -eq 0 ]]; then
+  usage
+  exit 1
+fi
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --calendar)
+      [[ $# -ge 2 ]] || die "missing value for --calendar"
+      calendar="$2"
+      shift 2
+      ;;
+    --id)
+      [[ $# -ge 2 ]] || die "missing value for --id"
+      event_id="$2"
+      shift 2
+      ;;
+    --title)
+      [[ $# -ge 2 ]] || die "missing value for --title"
+      title="$2"
+      shift 2
+      ;;
+    --start)
+      [[ $# -ge 2 ]] || die "missing value for --start"
+      start="$2"
+      shift 2
+      ;;
+    --end)
+      [[ $# -ge 2 ]] || die "missing value for --end"
+      end="$2"
+      shift 2
+      ;;
+    --dry-run)
+      dry_run=1
+      shift
+      ;;
+    --help|-h)
+      usage
+      exit 0
+      ;;
+    *)
+      die "unknown option: $1"
+      ;;
+  esac
+done
+
+if [[ -n "$event_id" ]]; then
+  if [[ -n "$title" || -n "$start" || -n "$end" ]]; then
+    die "use either --id or the --title/--start/--end matcher, not both"
+  fi
+else
+  [[ -n "$title" ]] || die "missing --title"
+  [[ -n "$start" ]] || die "missing --start"
+  [[ -n "$end" ]] || die "missing --end"
+  validate_datetime "$start"
+  validate_datetime "$end"
+fi
+
+result="$(
+  osascript \
+    -e 'on run argv' \
+    -e 'set calendarName to item 1 of argv' \
+    -e 'set targetEventId to item 2 of argv' \
+    -e 'set targetTitle to item 3 of argv' \
+    -e 'set startString to item 4 of argv' \
+    -e 'set endString to item 5 of argv' \
+    -e 'set dryRun to item 6 of argv' \
+    -e 'set outputLines to {}' \
+    -e 'tell application "Calendar"' \
+    -e 'if not (exists calendar calendarName) then error "Calendar not found: " & calendarName' \
+    -e 'set cal to calendar calendarName' \
+    -e 'if targetEventId is not "" then' \
+    -e 'set matchedEvents to every event of cal whose id is targetEventId' \
+    -e 'else' \
+    -e 'set text item delimiters to {"-", " ", ":"}' \
+    -e 'set startParts to text items of startString' \
+    -e 'set endParts to text items of endString' \
+    -e 'set text item delimiters to ""' \
+    -e 'set startDate to current date' \
+    -e 'set year of startDate to (item 1 of startParts) as integer' \
+    -e 'set month of startDate to (item 2 of startParts) as integer' \
+    -e 'set day of startDate to (item 3 of startParts) as integer' \
+    -e 'set time of startDate to (((item 4 of startParts) as integer) * hours) + (((item 5 of startParts) as integer) * minutes)' \
+    -e 'set endDate to current date' \
+    -e 'set year of endDate to (item 1 of endParts) as integer' \
+    -e 'set month of endDate to (item 2 of endParts) as integer' \
+    -e 'set day of endDate to (item 3 of endParts) as integer' \
+    -e 'set time of endDate to (((item 4 of endParts) as integer) * hours) + (((item 5 of endParts) as integer) * minutes)' \
+    -e 'set matchedEvents to every event of cal whose summary is targetTitle and start date = startDate and end date = endDate' \
+    -e 'end if' \
+    -e 'repeat with evt in matchedEvents' \
+    -e 'set end of outputLines to (id of evt) & tab & (summary of evt)' \
+    -e 'if dryRun is "0" then delete evt' \
+    -e 'end repeat' \
+    -e 'end tell' \
+    -e 'set text item delimiters to linefeed' \
+    -e 'return outputLines as text' \
+    -e 'end run' \
+    -- \
+    "$calendar" "$event_id" "$title" "$start" "$end" "$dry_run"
+)"
+
+if [[ -z "$result" ]]; then
+  die "no matching event found"
+fi
+
+while IFS=$'\t' read -r deleted_id deleted_title; do
+  [[ -n "$deleted_id" ]] || continue
+  if [[ "$dry_run" -eq 1 ]]; then
+    printf 'Matched event in %s: %s [id=%s]\n' "$calendar" "$deleted_title" "$deleted_id"
+  else
+    printf 'Deleted event from %s: %s [id=%s]\n' "$calendar" "$deleted_title" "$deleted_id"
+  fi
+done <<< "$result"
