@@ -529,3 +529,35 @@ dt = datetime.strptime(start, "%Y-%m-%d %H:%M")
 print((dt + timedelta(days=1)).strftime("%Y-%m-%d %H:%M"))
 PY
 }
+
+calendar_is_writable() {
+  local calendar_name="$1"
+  osascript - "$calendar_name" <<'APPLESCRIPT'
+on run argv
+  set calendarName to item 1 of argv
+  tell application "Calendar"
+    set matchingCalendars to every calendar whose name is calendarName
+    if (count of matchingCalendars) is 0 then error "Calendar not found: " & calendarName
+    set cal to first item of matchingCalendars
+    try
+      if writable of cal then
+        return "1"
+      else
+        return "0"
+      end if
+    on error
+      return "1"
+    end try
+  end tell
+end run
+APPLESCRIPT
+}
+
+require_writable_calendar() {
+  local calendar="$1"
+  local writable
+  writable="$(calendar_is_writable "$calendar")"
+  if [[ "$writable" != "1" ]]; then
+    calendar_die "calendar '$calendar' is read-only"
+  fi
+}

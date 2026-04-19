@@ -324,6 +324,14 @@ on run argv
     end if
 
     if dryRunValue is "0" then
+      try
+        if not (writable of foundCalendar) then error "Calendar '" & (name of foundCalendar) & "' is read-only"
+      end try
+      if (name of targetCalendar) is not (name of foundCalendar) then
+        try
+          if not (writable of targetCalendar) then error "Calendar '" & (name of targetCalendar) & "' is read-only"
+        end try
+      end if
       if (name of targetCalendar) is (name of foundCalendar) then
         set summary of foundEvent to effectiveTitle
         set start date of foundEvent to effectiveStart

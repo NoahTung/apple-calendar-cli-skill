@@ -342,6 +342,8 @@ main() {
     routing_note=" (bucket ${normalized_bucket} -> ${calendar})"
   fi
 
+  require_writable_calendar "$calendar"
+
   parse_datetime "$start" start
   parse_datetime "$end" end
 

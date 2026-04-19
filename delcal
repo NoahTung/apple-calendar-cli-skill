@@ -90,6 +90,7 @@ main() {
     [[ -n "$end" ]] || calendar_die "missing --end"
     parse_datetime "$start" start
     parse_datetime "$end" end
+    require_writable_calendar "$calendar"
   fi
 
   result="$(
@@ -133,13 +134,22 @@ on run argv
   tell application "Calendar"
     if targetEventId is not "" then
       set matchedEvents to {}
+      set foundCalendar to missing value
       repeat with cal in calendars
         set candidateEvents to every event of cal whose id is targetEventId
         if (count of candidateEvents) > 0 then
           set matchedEvents to candidateEvents
+          set foundCalendar to cal
           exit repeat
         end if
       end repeat
+      if foundCalendar is not missing value then
+        try
+          if not (writable of foundCalendar) then
+            error "Calendar '" & (name of foundCalendar) & "' is read-only"
+          end if
+        end try
+      end if
     else
       set matchingCalendars to every calendar whose name is calendarName
       if (count of matchingCalendars) is 0 then error "Calendar not found: " & calendarName
