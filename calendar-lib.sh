@@ -451,3 +451,34 @@ find_record_by_id() {
 
   return 1
 }
+
+json_get_field() {
+  local payload="$1"
+  local field="$2"
+  python3 -c '
+import json, sys
+field = sys.argv[1]
+try:
+    payload = json.loads(sys.argv[2])
+except json.JSONDecodeError:
+    print("")
+    sys.exit(0)
+value = payload.get(field, "")
+if value is None:
+    value = ""
+print(value)
+' "$field" "$payload"
+}
+
+merge_cli_and_json_field() {
+  local cli_value="$1"
+  local json_payload="$2"
+  local field_name="$3"
+
+  if [[ -n "$cli_value" ]]; then
+    printf '%s' "$cli_value"
+    return 0
+  fi
+
+  printf '%s' "$(json_get_field "$json_payload" "$field_name")"
+}

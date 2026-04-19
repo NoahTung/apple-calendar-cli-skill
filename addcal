@@ -13,7 +13,8 @@ Usage:
   addcal [calendar] <start> <end> <title>
   addcal --start "<when>" --end "<when>" --title "<title>" [--calendar "<name>"] [--bucket personal|work|life]
          [--location "<location>"] [--notes "<notes>"] [--url "<url>"] [--alarm "<minutes|none>"]
-         [--repeat "<daily|weekly|monthly|yearly|weekly 1,3,5>"] [--check-conflict]
+         [--repeat "<daily|weekly|monthly|yearly|weekly 1,3,5>"] [--rrule "<recurrence>"]
+         [--check-conflict] [--no-check-conflict] [--all-day] [--stdin-json]
   addcal --list-calendars
 
 Examples:
@@ -21,6 +22,7 @@ Examples:
   addcal --bucket work --start "tomorrow 9am" --end "tomorrow 10am" --title "Standup" --alarm "15"
   addcal --calendar "个人" --start "+2h" --end "+3h" --title "海底捞晚饭" --location "万达广场3楼" --notes "已订位"
   addcal --start "2026-04-18 18:00" --end "2026-04-18 19:00" --title "Gym" --repeat "weekly 1,3,5"
+  echo '{"calendar":"Personal","title":"Dinner","start":"2026-04-20 19:00","end":"2026-04-20 20:00","notes":"Booked"}' | addcal --stdin-json
 EOF
 }
 
@@ -153,10 +155,15 @@ main() {
   local url=""
   local alarm=""
   local repeat_spec=""
+  local rrule=""
   local recurrence=""
   local list_only=0
   local explicit_calendar=0
-  local check_conflict=0
+  local check_conflict=1
+  local no_check_conflict=0
+  local all_day=0
+  local stdin_json=0
+  local json_payload=""
   local normalized_bucket=""
   local routing_note=""
   local event_id=""
@@ -227,8 +234,25 @@ main() {
           repeat_spec="$2"
           shift 2
           ;;
+        --rrule)
+          [[ $# -ge 2 ]] || calendar_die "missing value for --rrule"
+          rrule="$2"
+          shift 2
+          ;;
         --check-conflict)
           check_conflict=1
+          shift
+          ;;
+        --no-check-conflict)
+          no_check_conflict=1
+          shift
+          ;;
+        --all-day)
+          all_day=1
+          shift
+          ;;
+        --stdin-json)
+          stdin_json=1
           shift
           ;;
         --list-calendars)
@@ -265,6 +289,31 @@ main() {
     esac
   fi
 
+  if [[ "$stdin_json" -eq 1 ]]; then
+    json_payload="$(cat)"
+  fi
+
+  calendar="$(merge_cli_and_json_field "$calendar" "$json_payload" calendar)"
+  title="$(merge_cli_and_json_field "$title" "$json_payload" title)"
+  start="$(merge_cli_and_json_field "$start" "$json_payload" start)"
+  end="$(merge_cli_and_json_field "$end" "$json_payload" end)"
+  location="$(merge_cli_and_json_field "$location" "$json_payload" location)"
+  notes="$(merge_cli_and_json_field "$notes" "$json_payload" notes)"
+  url="$(merge_cli_and_json_field "$url" "$json_payload" url)"
+  alarm="$(merge_cli_and_json_field "$alarm" "$json_payload" alarm)"
+  repeat_spec="$(merge_cli_and_json_field "$repeat_spec" "$json_payload" repeat)"
+  rrule="$(merge_cli_and_json_field "$rrule" "$json_payload" rrule)"
+
+  if [[ "$no_check_conflict" -eq 1 ]]; then
+    check_conflict=0
+  fi
+
+  local json_all_day
+  json_all_day="$(json_get_field "$json_payload" all_day)"
+  if [[ "$json_all_day" == "true" || "$json_all_day" == "1" ]]; then
+    all_day=1
+  fi
+
   if [[ $list_only -eq 1 ]]; then
     list_calendars
     exit 0
@@ -291,7 +340,11 @@ main() {
   fi
 
   alarm="$(normalize_alarm "$alarm")"
-  recurrence="$(normalize_repeat "$repeat_spec")"
+  if [[ -n "$rrule" ]]; then
+    recurrence="$rrule"
+  else
+    recurrence="$(normalize_repeat "$repeat_spec")"
+  fi
 
   if [[ "$check_conflict" -eq 1 ]]; then
     conflicts="$(check_conflicts "$calendar" \

@@ -12,6 +12,7 @@ usage() {
 Usage:
   editcal --id "<event-id>" [--title "..."] [--start "<when>"] [--end "<when>"] [--calendar "<name>"]
           [--location "..."] [--notes "..."] [--url "..."] [--alarm "<minutes|none>"] [--dry-run]
+          [--stdin-json]
 EOF
 }
 
@@ -28,6 +29,8 @@ main() {
   local new_alarm=""
   local dry_run=0
   local changed=0
+  local stdin_json=0
+  local json_payload=""
   local old_record=""
   local new_record=""
 
@@ -91,6 +94,10 @@ main() {
         dry_run=1
         shift
         ;;
+      --stdin-json)
+        stdin_json=1
+        shift
+        ;;
       --help|-h)
         usage
         exit 0
@@ -100,6 +107,30 @@ main() {
         ;;
     esac
   done
+
+  if [[ "$stdin_json" -eq 1 ]]; then
+    json_payload="$(cat)"
+  fi
+
+  event_id="$(merge_cli_and_json_field "$event_id" "$json_payload" id)"
+  new_title="$(merge_cli_and_json_field "$new_title" "$json_payload" title)"
+  new_start="$(merge_cli_and_json_field "$new_start" "$json_payload" start)"
+  new_end="$(merge_cli_and_json_field "$new_end" "$json_payload" end)"
+  new_calendar="$(merge_cli_and_json_field "$new_calendar" "$json_payload" calendar)"
+  new_location="$(merge_cli_and_json_field "$new_location" "$json_payload" location)"
+  new_notes="$(merge_cli_and_json_field "$new_notes" "$json_payload" notes)"
+  new_url="$(merge_cli_and_json_field "$new_url" "$json_payload" url)"
+
+  local json_alarm
+  json_alarm="$(json_get_field "$json_payload" alarm)"
+  if [[ -n "$json_alarm" ]]; then
+    new_alarm="$json_alarm"
+    new_alarm_set=1
+  fi
+
+  if [[ -n "$new_title" || -n "$new_start" || -n "$new_end" || -n "$new_calendar" || -n "$new_location" || -n "$new_notes" || -n "$new_url" || "$new_alarm_set" -eq 1 ]]; then
+    changed=1
+  fi
 
   [[ -n "$event_id" ]] || calendar_die "missing --id"
   [[ "$changed" -eq 1 ]] || calendar_die "provide at least one field to edit"
