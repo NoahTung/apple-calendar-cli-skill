@@ -320,8 +320,18 @@ main() {
   fi
 
   [[ -n "$start" ]] || calendar_die "missing start time"
-  [[ -n "$end" ]] || calendar_die "missing end time"
   [[ -n "$title" ]] || calendar_die "missing title"
+
+  if [[ "$all_day" -eq 1 ]]; then
+    start="$(normalize_date_input "$start")"
+    if [[ -z "$end" ]]; then
+      end="$(infer_all_day_end "$start")"
+    else
+      end="$(normalize_date_input "$end")"
+    fi
+  fi
+
+  [[ -n "$end" ]] || calendar_die "missing end time"
 
   if [[ -n "$bucket" && "$explicit_calendar" -eq 0 ]]; then
     normalized_bucket="$(normalize_bucket "$bucket")"
@@ -358,7 +368,7 @@ main() {
   fi
 
   event_id="$(
-    osascript - "$calendar" "$title" "$location" "$notes" "$url" "$alarm" "$recurrence" \
+    osascript - "$calendar" "$title" "$location" "$notes" "$url" "$alarm" "$recurrence" "$all_day" \
       "$start_year" "$start_month" "$start_day" "$start_hour" "$start_minute" \
       "$end_year" "$end_month" "$end_day" "$end_hour" "$end_minute" <<'APPLESCRIPT'
 on run argv
@@ -369,16 +379,17 @@ on run argv
   set urlValue to item 5 of argv
   set alarmValue to item 6 of argv
   set recurrenceValue to item 7 of argv
-  set startYear to (item 8 of argv) as integer
-  set startMonth to (item 9 of argv) as integer
-  set startDay to (item 10 of argv) as integer
-  set startHour to (item 11 of argv) as integer
-  set startMinute to (item 12 of argv) as integer
-  set endYear to (item 13 of argv) as integer
-  set endMonth to (item 14 of argv) as integer
-  set endDay to (item 15 of argv) as integer
-  set endHour to (item 16 of argv) as integer
-  set endMinute to (item 17 of argv) as integer
+  set allDayValue to item 8 of argv
+  set startYear to (item 9 of argv) as integer
+  set startMonth to (item 10 of argv) as integer
+  set startDay to (item 11 of argv) as integer
+  set startHour to (item 12 of argv) as integer
+  set startMinute to (item 13 of argv) as integer
+  set endYear to (item 14 of argv) as integer
+  set endMonth to (item 15 of argv) as integer
+  set endDay to (item 16 of argv) as integer
+  set endHour to (item 17 of argv) as integer
+  set endMinute to (item 18 of argv) as integer
 
   set startDate to current date
   set day of startDate to 1
@@ -400,7 +411,11 @@ on run argv
     set matchingCalendars to every calendar whose name is calendarName
     if (count of matchingCalendars) is 0 then error "Calendar not found: " & calendarName
     tell first item of matchingCalendars
-      set newEvent to make new event with properties {summary:eventTitle, start date:startDate, end date:endDate}
+      if allDayValue is "1" then
+        set newEvent to make new event with properties {summary:eventTitle, start date:startDate, end date:endDate, allday event:true}
+      else
+        set newEvent to make new event with properties {summary:eventTitle, start date:startDate, end date:endDate}
+      end if
       if locationValue is not "" then set location of newEvent to locationValue
       if notesValue is not "" then set description of newEvent to notesValue
       if urlValue is not "" then set url of newEvent to urlValue

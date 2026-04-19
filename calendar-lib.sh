@@ -376,7 +376,7 @@ if records:
         if not raw_record.strip():
             continue
         parts = raw_record.split(field_delim)
-        while len(parts) < 10:
+        while len(parts) < 11:
             parts.append("")
         item = {
             "id": parts[0],
@@ -389,6 +389,7 @@ if records:
             "url": parts[7],
             "alarm": parts[8],
             "recurrence": parts[9],
+            "all_day": parts[10],
         }
         items.append(item)
 
@@ -420,10 +421,11 @@ event_records_to_table() {
   local url
   local alarm
   local recurrence
+  local all_day
 
   while IFS= read -r -d "$RECORD_DELIM" record; do
     [[ -n "$record" ]] || continue
-    IFS="$FIELD_DELIM" read -r event_id calendar title start end location notes url alarm recurrence <<< "$record"
+    IFS="$FIELD_DELIM" read -r event_id calendar title start end location notes url alarm recurrence all_day <<< "$record"
     printf '[%s] %s | %s | %s -> %s\n' "$calendar" "$title" "$event_id" "$start" "$end"
     if [[ "$show_extra" -eq 1 ]]; then
       [[ -n "$location" ]] && printf '  location: %s\n' "$location"
@@ -431,6 +433,7 @@ event_records_to_table() {
       [[ -n "$url" ]] && printf '  url: %s\n' "$url"
       [[ -n "$alarm" ]] && printf '  alarm: %s\n' "$alarm"
       [[ -n "$recurrence" ]] && printf '  recurrence: %s\n' "$recurrence"
+      [[ "$all_day" == "1" ]] && printf '  all_day: true\n'
     fi
   done < <(printf '%s' "$records")
 }
@@ -466,6 +469,10 @@ except json.JSONDecodeError:
 value = payload.get(field, "")
 if value is None:
     value = ""
+elif isinstance(value, bool):
+    value = "1" if value else "0"
+else:
+    value = str(value)
 print(value)
 ' "$field" "$payload"
 }
@@ -481,4 +488,33 @@ merge_cli_and_json_field() {
   fi
 
   printf '%s' "$(json_get_field "$json_payload" "$field_name")"
+}
+
+is_date_only() {
+  local input="$1"
+  if [[ "$input" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    printf '1\n'
+  else
+    printf '0\n'
+  fi
+}
+
+normalize_date_input() {
+  local input="$1"
+  if [[ "$(is_date_only "$input")" == "1" ]]; then
+    printf '%s 00:00\n' "$input"
+  else
+    printf '%s\n' "$input"
+  fi
+}
+
+infer_all_day_end() {
+  local start="$1"
+  python3 - "$start" <<'PY'
+from datetime import datetime, timedelta
+import sys
+start = sys.argv[1]
+dt = datetime.strptime(start, "%Y-%m-%d %H:%M")
+print((dt + timedelta(days=1)).strftime("%Y-%m-%d %H:%M"))
+PY
 }
