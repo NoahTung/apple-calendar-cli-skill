@@ -185,7 +185,7 @@ def check_conflicts(calendar, start, end):
 # ── Apply ───────────────────────────────────────────────────────────
 
 def apply_event(draft):
-    cmd = [ADDCAL, "--start", draft["start"], "--end", draft["end"], "--title", draft["title"]]
+    cmd = [ADDCAL, "--start", draft["start"], "--end", draft["end"], "--title", draft["title"], "--no-check-conflict"]
     if draft["calendar"]:
         cmd += ["--calendar", draft["calendar"]]
     if draft["bucket"] and not draft["calendar"]:
