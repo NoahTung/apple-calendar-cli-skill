@@ -1,24 +1,33 @@
 ---
 name: apple-calendar-cli
-description: Manage Apple Calendar and iCloud calendars on macOS with non-interactive local CLIs: `addcal`, `listcal`, `delcal`, `editcal`, `showcal`, `batchcal`, and `img2cal`. Use when an agent needs to create, inspect, update, delete, batch-import, or ticket-normalize real Calendar.app events that should sync to iCloud.
+description: Hermes-first local CLIs for the real Apple Calendar on macOS. Use when an agent needs to create, inspect, update, delete, batch-import, or ticket-normalize real Calendar.app events that should sync to iCloud.
 metadata: {"clawdbot":{"emoji":"🗓️","os":["macos"],"requires":{"bins":["addcal","listcal","delcal"]}}}
 ---
 
 # Apple Calendar CLI
 
+Use this skill first when Hermes on macOS needs to create, inspect, update, delete, batch-import, or normalize events in the user's real Apple Calendar. The same commands work for Codex, Claude Code, and other shell-capable agents, but the defaults and documentation are optimized for Hermes workflows.
+
 Use these local commands instead of `khal` when the goal is to manipulate the real macOS Calendar.app data that syncs through iCloud.
 
 ## Why this skill
 
-- `addcal`, `listcal`, `delcal`, `editcal`, `showcal`, and `batchcal` are non-interactive and agent-friendly.
+- `addcal`, `listcal`, `delcal`, `editcal`, `showcal`, `batchcal`, and `img2cal` are non-interactive and agent-friendly.
 - They write to Apple Calendar directly through AppleScript.
 - If Calendar.app is already connected to iCloud, changes sync automatically.
+- JSON stdin support reduces shell-history exposure for structured payloads.
 
 ## First-run permissions
 
 - The first run may prompt for Calendar automation permission.
-- Some host environments such as Hermes may also show their own access prompts for scripts or workspace files.
+- Hermes may also show its own access prompts for scripts or workspace files.
 - If a prompt appears, approve it once so the CLI can reach Calendar.app cleanly.
+
+## Privacy and structured input
+
+- Prefer JSON via stdin for long notes or structured payloads. This avoids exposing event details in shell history and process arguments.
+- Persistent event logging is disabled by default.
+- Commands run locally and write directly to Calendar.app; no data leaves the Mac.
 
 ## Commands
 
@@ -31,12 +40,25 @@ listcal --list-calendars
 
 ### Create an event
 
+Short form:
+
 ```bash
 addcal "2026-04-18 19:00" "2026-04-18 20:00" "吃饭"
+```
+
+Structured form:
+
+```bash
 addcal --calendar "个人" --start "2026-04-18 19:00" --end "2026-04-18 20:00" --title "吃饭"
 addcal --bucket work --start "2026-04-18 09:00" --end "2026-04-18 09:30" --title "Team standup"
 addcal --calendar "个人" --start "today 18:00" --end "today 19:00" --title "海底捞晚饭" --location "万达广场3楼" --notes "已订位，4人" --alarm 15
 addcal --calendar "个人" --start "2026-04-18 18:00" --end "2026-04-18 19:00" --title "健身" --repeat "weekly 1,3,5"
+```
+
+JSON stdin (preferred for agents):
+
+```bash
+echo '{"calendar":"个人","title":"吃饭","start":"2026-04-20 19:00","end":"2026-04-20 20:00","notes":"已订位"}' | addcal --stdin-json
 ```
 
 `--calendar` is the explicit override.
@@ -134,9 +156,9 @@ Route events in this order:
 
 Then:
 
-1. Use `addcal` to create new events.
+1. Use `addcal` to create new events. For agent-generated payloads, prefer `echo '{...}' | addcal --stdin-json`.
 2. Use `listcal --format tsv` or `showcal --format json` to inspect existing events and capture ids.
-3. Use `editcal --id ...` for safe updates.
+3. Use `editcal --id ...` for safe updates. JSON stdin is also supported.
 4. Use `delcal --id ...` for safe deletion.
 5. Use `batchcal --dry-run` before any large import.
 6. Use `img2cal --draft` to normalize and preview ticket data before creating events.
@@ -171,6 +193,7 @@ When the user sends a ticket image (movie, train, flight, bus, concert) or descr
    - Use `--calendar` if the exact calendar is known.
    - Otherwise use `--bucket` (`personal`, `work`, `life`) and let `addcal` resolve it.
    - Pass `--location`, `--notes`, `--alarm` as appropriate.
+   - For sensitive or structured data, prefer piping JSON to `addcal --stdin-json`.
 
 ## Pitfalls
 
@@ -178,5 +201,8 @@ When the user sends a ticket image (movie, train, flight, bus, concert) or descr
 - **Batch input is JSON-first**: `batchcal` does not parse natural language directly. The agent should turn user requests into JSON first, then run `batchcal`.
 - **Install location**: This skill lives at `~/skills/apple-calendar-cli/`, not `~/.hermes/skills/`. Use full path `/Users/mac/skills/apple-calendar-cli/addcal` if the skill is not installed in the Hermes skills directory.
 - **Always check `--help` first**: The CLI syntax may differ from intuition (e.g. short form `addcal "start" "end" "title"` vs long form with `--start`, `--end`, `--title`, `--calendar`).
-- **No `--alarm` in older versions**: If you see `unknown option: --alarm`, the `addcal` script needs updating. Alarm support was added in a later revision.
+- **Prefer JSON stdin for sensitive payloads**: `echo '{...}' | addcal --stdin-json` keeps event details out of shell history.
+- **Conflict checking is on by default**: `addcal` now checks for overlapping events by default. Use `--no-check-conflict` to bypass intentionally.
+- **All-day events**: Use `--all-day` or pass `"all_day": true` in JSON stdin. Provide the date as `YYYY-MM-DD`.
+- **Native recurrence rules**: Use `--rrule` for advanced recurrence; it overrides `--repeat` when both are present.
 - **Location auto-fill is not built-in yet**: `--auto-location` (calling map APIs) is a planned Phase 3 feature, not yet implemented.

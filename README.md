@@ -1,8 +1,8 @@
 # Apple Calendar CLI Skill
 
-Tiny agent-first CLIs for the real Apple Calendar on macOS.
+Hermes-first local CLIs for the real Apple Calendar on macOS.
 
-Use Apple Calendar and iCloud calendars on macOS through a small set of non-interactive local CLIs:
+Manage Calendar.app and iCloud calendars through small non-interactive commands built for Hermes and other shell-capable agents:
 
 - `addcal`
 - `listcal`
@@ -11,8 +11,6 @@ Use Apple Calendar and iCloud calendars on macOS through a small set of non-inte
 - `showcal`
 - `batchcal`
 - `img2cal`
-
-Built for Codex, Claude Code, Hermes, and any local agent that can run shell commands.
 
 ## Why This Exists
 
@@ -29,11 +27,13 @@ There is also an ecosystem gap on macOS itself:
 
 This repo optimizes for one very specific workflow instead:
 
-> Let an agent create, inspect, update, delete, batch-import, and ticket-normalize events in the user's actual Apple Calendar on macOS, then let iCloud sync the result.
+> Let a local agent create, inspect, update, delete, batch-import, and ticket-normalize events in the user's actual Apple Calendar on macOS, then let iCloud sync the result.
 
 In practice, that means the shortest useful path is:
 
-`agent -> local calendar CLIs -> Calendar.app -> iCloud`
+`Hermes -> local calendar CLIs -> Calendar.app -> iCloud`
+
+The same commands work for Codex, Claude Code, and any other shell-capable agent, but the packaging and defaults are designed with Hermes workflows in mind first.
 
 ## Why This Repo Instead
 
@@ -54,7 +54,7 @@ That means:
 
 ## Key Advantages
 
-- **Agent-first**: built for Codex, Claude Code, Hermes, and other shell-capable agents
+- **Hermes-first**: built primarily for Hermes on macOS, and compatible with Codex, Claude Code, and other shell-capable agents
 - **Non-interactive**: create, inspect, update, delete, batch-import, and normalize ticket events without opening a UI or stepping through prompts
 - **Uses the real Apple Calendar**: events land in Calendar.app, not in a sidecar file format
 - **iCloud-native through the OS**: if Calendar.app already syncs, these commands sync too
@@ -139,6 +139,8 @@ This repository is meant to be self-contained: publish the docs, helper library,
 
 ## Installation
 
+### General install (any macOS user)
+
 Clone the repo, then copy the CLI scripts into a directory on your `PATH`:
 
 ```bash
@@ -156,7 +158,27 @@ showcal --help
 img2cal --help
 ```
 
-If macOS asks for Calendar automation permission, allow it for the terminal or agent app you are using.
+### Hermes skill install
+
+For Hermes users, keep the repo in `~/skills` or link it under `~/.hermes/skills/`:
+
+```bash
+mkdir -p ~/skills
+git clone <repo-url> ~/skills/apple-calendar-cli
+# Or symlink if you already cloned elsewhere
+ln -s ~/skills/apple-calendar-cli ~/.hermes/skills/apple-calendar-cli
+```
+
+Hermes can then call these commands directly from skill workflows using full paths or by ensuring `~/.local/bin` is on `PATH`.
+
+## Privacy And Permissions
+
+- Commands run locally on macOS and talk to Calendar.app through AppleScript.
+- Persistent event logging is **disabled by default**.
+- The first run may trigger a macOS automation permission prompt for Calendar. Approve it once for the terminal or agent app you are using.
+- When possible, prefer **JSON via stdin** for long notes or structured payloads instead of exposing them in process arguments. This reduces visibility in shell history and process listings.
+- This project writes to your real local Calendar.app data, not a sidecar file or separate `.ics` store.
+- Event details passed as command-line arguments may appear in shell history. Use `--stdin-json` (where supported) or pipe data for sensitive content.
 
 ## Command Usage
 
@@ -185,7 +207,16 @@ addcal --calendar "Personal" --start "today 18:00" --end "today 19:00" --title "
 addcal --calendar "Personal" --start "2026-04-18 18:00" --end "2026-04-18 19:00" --title "Gym" --repeat "weekly 1,3,5"
 ```
 
+JSON stdin (preferred for agent workflows to avoid shell-history leakage):
+
+```bash
+echo '{"calendar":"Personal","title":"Dinner","start":"2026-04-20 19:00","end":"2026-04-20 20:00","notes":"Booked"}' | addcal --stdin-json
+echo '{"calendar":"Personal","title":"All-day event","start":"2026-04-20","all_day":true}' | addcal --stdin-json
+```
+
 Routing is intentionally simple: `--calendar` wins when the exact destination is known, and `--bucket` (`personal`, `work`, or `life`) is only a hint for picking a likely calendar. It first prefers mapped calendars such as `个人`/`Personal`, `工作`/`Work`, or `生活`/`Life`, then falls back to the default calendar if no match exists. This CLI does not try to understand full natural-language requests.
+
+Recurrence can be specified with the friendly `--repeat` DSL or with `--rrule` for native recurrence rules. `--rrule` overrides `--repeat` when both are provided.
 
 ### List events
 
@@ -222,6 +253,12 @@ showcal --id "0243912F-0D42-4477-A193-A881F73E7434" --format json
 ```bash
 editcal --id "0243912F-0D42-4477-A193-A881F73E7434" --start "2026-04-18 21:00" --end "2026-04-18 22:00"
 editcal --id "0243912F-0D42-4477-A193-A881F73E7434" --title "剪辑视频v2" --alarm 10 --dry-run
+```
+
+JSON stdin:
+
+```bash
+echo '{"id":"0243912F-0D42-4477-A193-A881F73E7434","title":"Dinner v2"}' | editcal --stdin-json
 ```
 
 ### Delete events
@@ -283,15 +320,17 @@ Supported `--type` values: `movie`, `train`, `bus`, `flight`, `concert`.
 1. Use `--calendar` when the exact destination calendar is known.
 2. Use `--bucket` to hint at a likely destination when the exact calendar is not known.
 3. Run `listcal --list-calendars` if the choice is still unclear.
-4. Use `addcal` to create events.
+4. Use `addcal` to create events. For agent-generated payloads, prefer `echo '{...}' | addcal --stdin-json`.
 5. Use `listcal --format tsv` or `showcal --format json` to inspect events and capture event ids.
-6. Use `editcal --id ...` for safe updates.
+6. Use `editcal --id ...` for safe updates. JSON stdin is also supported.
 7. Use `delcal --id ...` for reliable deletion.
 8. Use `batchcal --dry-run` before large imports.
 9. Use `img2cal --draft` to normalize and preview ticket data before creating events.
 10. Use `img2cal --apply` after the ticket draft is confirmed.
 
 For automation, prefer deletion by event id rather than by title only.
+
+The safest mutation path is **id-first**: list, capture the exact id, then edit or delete by that id. This avoids ambiguity when multiple events share similar titles.
 
 ## Why It Stands Out
 
@@ -321,9 +360,11 @@ But if the user's machine is a Mac and the goal is simply to operate the real Ap
 - macOS only
 - depends on Calendar.app and AppleScript
 - datetime input format accepts `YYYY-MM-DD HH:MM` plus light shortcuts like `today 18:00`, `tomorrow 9am`, and `+2h`
+- all-day events use the same `YYYY-MM-DD` date input and are created as true all-day events in Calendar.app
 - list output timestamps come from AppleScript / system locale formatting
 - this is for real Calendar.app data, not standalone `.ics` files
 - alarm handling is still centered on `display alarm`; other alarm types such as audio, email, or open-file alarms are not fully preserved across read/edit flows
+- conflict checking is enabled by default for new events; use `--no-check-conflict` to bypass intentionally
 
 ## Publishing Notes
 
