@@ -1,5 +1,13 @@
 # Apple Calendar CLI Skill
 
+![version](https://img.shields.io/badge/version-0.1.0-blue)
+![license](https://img.shields.io/badge/license-MIT-green)
+![platform](https://img.shields.io/badge/platform-macOS-black)
+![calendar](https://img.shields.io/badge/calendar-Apple%20Calendar-red)
+![sync](https://img.shields.io/badge/sync-iCloud-blue)
+![interface](https://img.shields.io/badge/interface-local%20CLI-orange)
+![mode](https://img.shields.io/badge/mode-non--interactive-yellow)
+
 Hermes-first local CLIs for the real Apple Calendar on macOS.
 
 Manage Calendar.app and iCloud calendars through small non-interactive commands built for Hermes and other shell-capable agents:
