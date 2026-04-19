@@ -1,1 +1,7 @@
 .DS_Store
+
+# Internal design docs — not for public distribution
+docs/superpowers/
+
+# Local tests — kept in source for reference but not published
+tests/
