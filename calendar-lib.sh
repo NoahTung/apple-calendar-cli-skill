@@ -359,6 +359,17 @@ PY
   esac
 }
 
+resolve_recurrence_input() {
+  local repeat_spec="$1"
+  local rrule="$2"
+
+  if [[ -n "$rrule" ]]; then
+    printf '%s' "$rrule"
+  else
+    normalize_repeat "$repeat_spec"
+  fi
+}
+
 json_from_records() {
   local records="$1"
 

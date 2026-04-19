@@ -350,11 +350,7 @@ main() {
   fi
 
   alarm="$(normalize_alarm "$alarm")"
-  if [[ -n "$rrule" ]]; then
-    recurrence="$rrule"
-  else
-    recurrence="$(normalize_repeat "$repeat_spec")"
-  fi
+  recurrence="$(resolve_recurrence_input "$repeat_spec" "$rrule")"
 
   if [[ "$check_conflict" -eq 1 ]]; then
     conflicts="$(check_conflicts "$calendar" \

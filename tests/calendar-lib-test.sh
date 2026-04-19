@@ -51,6 +51,10 @@ assert_eq "none" "$(normalize_alarm none)" "normalizes none alarm"
 assert_eq "FREQ=DAILY;INTERVAL=1" "$(normalize_repeat daily)" "supports daily repeat"
 assert_eq "FREQ=WEEKLY;INTERVAL=1;BYDAY=MO,WE,FR" "$(normalize_repeat "weekly 1,3,5")" "supports weekday repeat"
 
+assert_eq "FREQ=WEEKLY;BYDAY=MO,WE,FR" "$(resolve_recurrence_input "" "FREQ=WEEKLY;BYDAY=MO,WE,FR")" "uses explicit rrule"
+assert_eq "FREQ=WEEKLY;INTERVAL=1;BYDAY=MO,WE,FR" "$(resolve_recurrence_input "weekly 1,3,5" "")" "falls back to friendly repeat"
+assert_eq "FREQ=DAILY;INTERVAL=1" "$(resolve_recurrence_input "daily" "FREQ=DAILY;INTERVAL=1")" "rrule overrides repeat when both present"
+
 json_output="$(json_from_records $'evt-1\034Work\034Title\0342026-04-18 09:00\0342026-04-18 10:00\034Office\034Prep\034https://example.com\034-15\034FREQ=DAILY;INTERVAL=1\036')"
 assert_contains "$json_output" '"id": "evt-1"' "json output includes id"
 assert_contains "$json_output" '"location": "Office"' "json output includes location"
