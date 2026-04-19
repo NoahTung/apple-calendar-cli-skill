@@ -84,6 +84,34 @@ Use this skill when:
 
 This is a better fit than `khal` when the target is the real Apple Calendar database on a Mac and the caller is an agent or script.
 
+## Compared With CalDAV Toolchains
+
+`khal` + `vdirsyncer` and similar CalDAV stacks are good tools, but they optimize for a different workflow.
+
+Choose a CalDAV toolchain when you want:
+
+- cross-platform calendar access
+- provider-agnostic sync across iCloud, Google, Fastmail, Nextcloud, and other CalDAV services
+- a local `.ics` mirror and explicit sync control
+- a workflow centered on `khal` and `vdirsyncer`
+
+Choose this repo when you want:
+
+- macOS-native control of the real Calendar.app data
+- the shortest path from agent command to Apple Calendar event
+- non-interactive local CLI commands for CRUD, batch import, and ticket normalization
+- no extra sync layer, CalDAV config, cache DB, or separate `.ics` storage to manage
+
+The tradeoff is intentional:
+
+- CalDAV toolchains are broader and more portable
+- this repo is narrower, but much better aligned with Hermes-style local agent workflows on macOS
+
+In other words:
+
+- if your goal is "manage calendars everywhere through CalDAV," use `khal` / `vdirsyncer`
+- if your goal is "let my local agent manage my actual Apple Calendar on this Mac," this repo is usually the better fit
+
 ## Requirements
 
 - macOS
