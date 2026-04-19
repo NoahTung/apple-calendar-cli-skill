@@ -20,6 +20,30 @@ Manage Calendar.app and iCloud calendars through small non-interactive commands 
 - `batchcal`
 - `img2cal`
 
+Use this repo when you want:
+
+- direct writes to the real Calendar.app database
+- iCloud sync through the OS
+- non-interactive local CLI commands for CRUD, batch import, and ticket normalization
+- a macOS-native workflow instead of a CalDAV stack, cache DB, or `.ics` mirror
+
+This repo is built for one very specific path:
+
+`Hermes -> local calendar CLIs -> Calendar.app -> iCloud`
+
+The same commands work for Codex, Claude Code, and any other shell-capable agent, but the packaging and defaults are designed with Hermes workflows in mind first.
+
+## Best Fit
+
+Use this skill when:
+
+- you are on macOS
+- Calendar.app is already connected to iCloud
+- you want a stable local CLI for agents
+- you want non-interactive commands that are easy to script
+
+This is a better fit than `khal` when the target is the real Apple Calendar database on a Mac and the caller is an agent or script.
+
 ## Why This Exists
 
 Most calendar automation tools optimize for a different target:
@@ -33,15 +57,7 @@ There is also an ecosystem gap on macOS itself:
 - Apple ships the built-in `shortcuts` command-line tool, which can drive automation flows including Reminders-oriented workflows
 - Apple does not provide an equivalent dedicated CLI for Calendar.app event management
 
-This repo optimizes for one very specific workflow instead:
-
-> Let a local agent create, inspect, update, delete, batch-import, and ticket-normalize events in the user's actual Apple Calendar on macOS, then let iCloud sync the result.
-
-In practice, that means the shortest useful path is:
-
-`Hermes -> local calendar CLIs -> Calendar.app -> iCloud`
-
-The same commands work for Codex, Claude Code, and any other shell-capable agent, but the packaging and defaults are designed with Hermes workflows in mind first.
+This repo exists to let a local agent create, inspect, update, delete, batch-import, and ticket-normalize events in the user's actual Apple Calendar on macOS.
 
 ## Why This Repo Instead
 
@@ -59,38 +75,6 @@ That means:
 - no extra CalDAV sync layer
 - no local `.ics`-only detour
 - no giant automation framework required
-
-## Key Advantages
-
-- **Hermes-first**: built primarily for Hermes on macOS, and compatible with Codex, Claude Code, and other shell-capable agents
-- **Non-interactive**: create, inspect, update, delete, batch-import, and normalize ticket events without opening a UI or stepping through prompts
-- **Uses the real Apple Calendar**: events land in Calendar.app, not in a sidecar file format
-- **iCloud-native through the OS**: if Calendar.app already syncs, these commands sync too
-- **Much simpler than CalDAV stacks**: no `vdirsyncer`, no `khal` config, no separate sync troubleshooting
-- **Small surface area**: a compact set of focused commands is easy to audit, script, and extend
-
-## What This Solves
-
-Many calendar CLI workflows are built around `khal` + `vdirsyncer` + CalDAV sync. That can be useful, but it adds setup complexity and is often a poor fit when the real goal is simpler:
-
-> Create, inspect, update, delete, batch-import, and normalize ticket events in the user's actual Apple Calendar, and let iCloud sync the result.
-
-This skill takes the direct route:
-
-`agent -> local calendar CLIs -> Calendar.app -> iCloud`
-
-Because it writes through macOS Calendar.app, events show up in Apple Calendar and sync through iCloud automatically if the account is already connected.
-
-## Best Fit
-
-Use this skill when:
-
-- you are on macOS
-- Calendar.app is already connected to iCloud
-- you want a stable local CLI for agents
-- you want non-interactive commands that are easy to script
-
-This is a better fit than `khal` when the target is the real Apple Calendar database on a Mac and the caller is an agent or script.
 
 ## Compared With CalDAV Toolchains
 
@@ -130,20 +114,6 @@ In other words:
 ### First-run permissions
 
 The first run may trigger a macOS Calendar automation prompt. If that happens, approve it once so these CLIs can reach Calendar.app cleanly.
-
-## Files
-
-- [SKILL.md](/Users/mac/skills/apple-calendar-cli/SKILL.md): agent-facing instructions
-- `addcal`: create events
-- `listcal`: list events
-- `delcal`: delete events
-- `editcal`: edit an event by id
-- `showcal`: inspect one event by id
-- `batchcal`: dry-run or apply a JSON event plan
-- `img2cal`: normalize ticket data into calendar event drafts or created events
-- `calendar-lib.sh`: shared helper library for the CLI scripts
-
-This repository is meant to be self-contained: publish the docs, helper library, and CLI scripts together.
 
 ## Installation
 
@@ -325,43 +295,15 @@ Supported `--type` values: `movie`, `train`, `bus`, `flight`, `concert`.
 
 ## Recommended Agent Workflow
 
-1. Use `--calendar` when the exact destination calendar is known.
-2. Use `--bucket` to hint at a likely destination when the exact calendar is not known.
-3. Run `listcal --list-calendars` if the choice is still unclear.
-4. Use `addcal` to create events. For agent-generated payloads, prefer `echo '{...}' | addcal --stdin-json`.
-5. Use `listcal --format tsv` or `showcal --format json` to inspect events and capture event ids.
-6. Use `editcal --id ...` for safe updates. JSON stdin is also supported.
-7. Use `delcal --id ...` for reliable deletion.
-8. Use `batchcal --dry-run` before large imports.
-9. Use `img2cal --draft` to normalize and preview ticket data before creating events.
-10. Use `img2cal --apply` after the ticket draft is confirmed.
+1. Resolve the destination with `--calendar`, or use `--bucket` if the exact calendar is not known.
+2. Run `listcal` first to inspect the time range and avoid accidental overlap.
+3. Create with `addcal`; for agent-generated payloads, prefer `echo '{...}' | addcal --stdin-json`.
+4. Capture exact ids with `listcal --format tsv` or `showcal --format json`, then update with `editcal --id ...` or delete with `delcal --id ...`.
+5. Use `batchcal --dry-run` for large imports and `img2cal --draft` before ticket-based event creation.
 
 For automation, prefer deletion by event id rather than by title only.
 
 The safest mutation path is **id-first**: list, capture the exact id, then edit or delete by that id. This avoids ambiguity when multiple events share similar titles.
-
-## Why It Stands Out
-
-Compared with nearby tools, this project makes a different tradeoff:
-
-- compared with `khal` / `vdirsyncer`: it optimizes for macOS-native iCloud control instead of CalDAV portability
-- compared with one-off AppleScript snippets: it provides reusable, named CLIs with a stable interface
-- compared with large MCP servers: it stays small, local, and easy to adopt
-
-If your target is "make my agent manage my actual Apple Calendar on my Mac", this project is intentionally the shortest path.
-
-## Why Not khal / vdirsyncer?
-
-This skill intentionally does not depend on `khal` or `vdirsyncer`.
-
-Those tools are useful for:
-
-- CalDAV-first workflows
-- local `.ics` / vdir storage
-- Linux and cross-platform sync setups
-- teams already committed to that toolchain
-
-But if the user's machine is a Mac and the goal is simply to operate the real Apple Calendar that already syncs to iCloud, AppleScript through Calendar.app is usually the shortest and most reliable path.
 
 ## Limitations
 
@@ -373,20 +315,3 @@ But if the user's machine is a Mac and the goal is simply to operate the real Ap
 - this is for real Calendar.app data, not standalone `.ics` files
 - alarm handling is still centered on `display alarm`; other alarm types such as audio, email, or open-file alarms are not fully preserved across read/edit flows
 - conflict checking is enabled by default for new events; use `--no-check-conflict` to bypass intentionally
-
-## Publishing Notes
-
-If you publish this skill online, keep the repository self-contained:
-
-- `README.md`
-- `SKILL.md`
-- `addcal`
-- `listcal`
-- `delcal`
-- `editcal`
-- `showcal`
-- `batchcal`
-- `img2cal`
-- `calendar-lib.sh`
-
-Without the companion CLI commands, the skill text alone is not enough.
