@@ -215,6 +215,39 @@ import json
 import sys
 items = json.loads(sys.argv[1])
 print(f"Planned events: {len(items)}")
+
+source_keys = {}
+duplicates = []
+for item in items:
+    sk = item.get("source_key", "")
+    if sk:
+        if sk in source_keys:
+            duplicates.append((item["index"], source_keys[sk], sk))
+        else:
+            source_keys[sk] = item["index"]
+
+missing_fields = []
+for item in items:
+    missing = []
+    if not item.get("title"):
+        missing.append("title")
+    if not item.get("start"):
+        missing.append("start")
+    if not item.get("end"):
+        missing.append("end")
+    if missing:
+        missing_fields.append((item["index"], missing))
+
+if duplicates:
+    print(f"Likely duplicates: {len(duplicates)}")
+    for idx1, idx2, sk in duplicates:
+        print(f"  items #{idx1} and #{idx2} share source_key '{sk}'")
+
+if missing_fields:
+    print(f"Missing required fields: {len(missing_fields)}")
+    for idx, fields in missing_fields:
+        print(f"  item #{idx} missing {', '.join(fields)}")
+
 for item in items:
     destination = item["calendar"] or f"bucket:{item['bucket']}" if item["bucket"] else "(default)"
     print(f"- #{item['index']} {item['type']} | {item['title']} | {item['start']} -> {item['end']} | {destination}")
