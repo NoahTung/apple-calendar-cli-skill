@@ -98,7 +98,7 @@ main() {
   local event_id=""
   local format="table"
   local raw_output=""
-  local id calendar title start end location notes url alarm recurrence
+  local id calendar title start end location notes url alarm recurrence all_day
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
