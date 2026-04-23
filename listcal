@@ -22,10 +22,12 @@ query_events() {
   local all_calendars="$1"
   local calendar="$2"
   local title_contains="$3"
+  local script_args=()
+  local script_line
 
-  osascript - "$all_calendars" "$calendar" "$title_contains" "$FIELD_DELIM" "$RECORD_DELIM" \
-    "$start_year" "$start_month" "$start_day" "$start_hour" "$start_minute" \
-    "$end_year" "$end_month" "$end_day" "$end_hour" "$end_minute" <<'APPLESCRIPT'
+  while IFS= read -r script_line; do
+    script_args+=(-e "$script_line")
+  done <<'APPLESCRIPT'
 on pad2(n)
   if n < 10 then return "0" & (n as text)
   return n as text
@@ -51,6 +53,7 @@ on isoDate(theDate)
 end isoDate
 
 on safeText(inputValue, fieldDelim, recordDelim)
+  if inputValue is missing value then return ""
   set normalizedValue to inputValue as text
   set normalizedValue to my replaceText(normalizedValue, return, " ")
   set normalizedValue to my replaceText(normalizedValue, linefeed, " ")
@@ -95,9 +98,9 @@ on run argv
 
   tell application "Calendar"
     if includeAllCalendars is "1" then
-      set selectedCalendars to every calendar
+      set selectedCalendars to calendars
     else
-      set selectedCalendars to every calendar whose name is selectedCalendar
+      set selectedCalendars to calendars whose name is selectedCalendar
       if (count of selectedCalendars) is 0 then error "Calendar not found: " & selectedCalendar
     end if
 
@@ -129,9 +132,20 @@ on run argv
           end try
           set allDayValue to "0"
           try
-            if allday event of evt then set allDayValue to "1"
+            set eventIsAllDay to (get allday event of evt)
+            if eventIsAllDay then set allDayValue to "1"
           end try
-          set recordText to (id of evt) & fieldDelim & (name of cal) & fieldDelim & my safeText(eventTitle, fieldDelim, recordDelim) & fieldDelim & my isoDate(start date of evt) & fieldDelim & my isoDate(end date of evt) & fieldDelim & my safeText(eventLocation, fieldDelim, recordDelim) & fieldDelim & my safeText(eventNotes, fieldDelim, recordDelim) & fieldDelim & my safeText(eventURL, fieldDelim, recordDelim) & fieldDelim & (alarmValue as text) & fieldDelim & my safeText(recurrenceValue, fieldDelim, recordDelim) & fieldDelim & allDayValue
+          set recordText to (id of evt)
+          set recordText to recordText & fieldDelim & (name of cal)
+          set recordText to recordText & fieldDelim & my safeText(eventTitle, fieldDelim, recordDelim)
+          set recordText to recordText & fieldDelim & my isoDate(start date of evt)
+          set recordText to recordText & fieldDelim & my isoDate(end date of evt)
+          set recordText to recordText & fieldDelim & my safeText(eventLocation, fieldDelim, recordDelim)
+          set recordText to recordText & fieldDelim & my safeText(eventNotes, fieldDelim, recordDelim)
+          set recordText to recordText & fieldDelim & my safeText(eventURL, fieldDelim, recordDelim)
+          set recordText to recordText & fieldDelim & (alarmValue as text)
+          set recordText to recordText & fieldDelim & my safeText(recurrenceValue, fieldDelim, recordDelim)
+          set recordText to recordText & fieldDelim & allDayValue
           set outputText to outputText & recordText & recordDelim
         end if
       end repeat
@@ -141,6 +155,10 @@ on run argv
   end tell
 end run
 APPLESCRIPT
+
+  osascript "${script_args[@]}" "$all_calendars" "$calendar" "$title_contains" "$FIELD_DELIM" "$RECORD_DELIM" \
+    "$start_year" "$start_month" "$start_day" "$start_hour" "$start_minute" \
+    "$end_year" "$end_month" "$end_day" "$end_hour" "$end_minute"
 }
 
 main() {

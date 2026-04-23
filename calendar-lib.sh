@@ -37,11 +37,52 @@ normalize_bucket() {
 }
 
 list_calendars() {
-  osascript -e 'tell application "Calendar" to get name of every calendar' | python3 -c '
+  local script_args=()
+  local script_line
+
+  while IFS= read -r script_line; do
+    script_args+=(-e "$script_line")
+  done <<'APPLESCRIPT'
+on replaceText(inputValue, findValue, replaceValue)
+  set originalDelims to AppleScript's text item delimiters
+  set AppleScript's text item delimiters to findValue
+  set parts to every text item of (inputValue as text)
+  set AppleScript's text item delimiters to replaceValue
+  set normalizedValue to parts as text
+  set AppleScript's text item delimiters to originalDelims
+  return normalizedValue
+end replaceText
+
+on safeText(inputValue, recordDelim)
+  if inputValue is missing value then return ""
+  set normalizedValue to inputValue as text
+  set normalizedValue to my replaceText(normalizedValue, return, " ")
+  set normalizedValue to my replaceText(normalizedValue, linefeed, " ")
+  set normalizedValue to my replaceText(normalizedValue, tab, " ")
+  set normalizedValue to my replaceText(normalizedValue, recordDelim, " ")
+  return normalizedValue
+end safeText
+
+on run argv
+  set recordDelim to item 1 of argv
+  set outputText to ""
+
+  tell application "Calendar"
+    repeat with cal in calendars
+      set outputText to outputText & my safeText(name of cal, recordDelim) & recordDelim
+    end repeat
+  end tell
+
+  return outputText
+end run
+APPLESCRIPT
+
+  osascript "${script_args[@]}" "$RECORD_DELIM" | python3 -c '
 import sys
-text = sys.stdin.read().strip()
+record_delim = "\036"
+text = sys.stdin.read()
 if text:
-    for item in text.split(","):
+    for item in text.split(record_delim):
         value = item.strip()
         if value:
             print(value)
